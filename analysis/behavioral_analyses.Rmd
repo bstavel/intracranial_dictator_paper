@@ -1,0 +1,613 @@
+---
+title: "Dictator Paper Behavioral Analysis"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo <- FALSE,  # don't print the code chunk
+  warning <- FALSE,  # don't print warnings
+  message <- FALSE,  # don't print messages
+  fig.width <- 12,  # set default width of figures
+  fig.height <- 6,  # set default height of figures
+  fig.align <- "center",  # always align figure in center
+  fig.pos <- "H",  # always plot figure at the exact location of the code chunk
+  cache <- TRUE)  # cache results
+
+## libraries ##
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+library(ggthemr)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(wesanderson)
+library(ggsci)
+library(zoo)
+library(kableExtra)
+library(lme4)
+library(RColorBrewer)
+library(doParallel)
+library(parallel)
+library(foreach)
+library(here)
+library(fs)
+library(ggcorrplot)
+library(viridis)
+library(lmtest)
+library(janitor)
+library(extrafont)
+
+## hand written functions ##
+source(path(here(), "R", "load_behave_data.R"))
+source(path(here(), "R", "prep_behave_data.R"))
+source(path(here(), "R", "stretch_start_end.R"))
+source(path(here(), "R", "load_high_gamma_data.R"))
+source(path(here(), "R", "rolling_window_and_baseline.R"))
+source(path(here(), "R", "compile_results.R"))
+# source('~/Projects/nice_r_functions/ggpaired_pretty.R')
+source(path(here(), "R", 'mutate_cond.R'))
+
+## plotting helpers ##
+ggthemr("solarized")
+solarized_palette <- c(
+        '#073642', '#E1965D',
+        '#268bd2', '#dc322f',
+        '#2aa198', '#b58900',
+       '#6c71c4', '#d33682')
+
+getPalette = colorRampPalette(brewer.pal(12, "Set1"))
+
+# ## parallelization ##
+# nCores <- 4
+# registerDoParallel(nCores)
+
+```
+
+## Behavioral analyses
+
+### Load and Clean Data
+
+```{r behave-prep, echo = T}
+
+# path to beahvioral files #
+path_to_raw_behave <- fs::path(here(), "../dg_behave_formatted")
+path_to_behave_munge <- fs::path(here(), "munge", "combined_behavioral_data.csv")
+path_to_behave_clean <- fs::path(here(), "munge", "clean_behavioral_data.csv")
+
+# concactenate behavioral data #
+load_behave_data(path_to_raw_behave)
+
+# prep behavioral data #
+prep_behave_data(path_to_behave_munge)
+
+# load clean data #
+behave_data <- read.csv(path_to_behave_clean)
+
+```
+
+
+### SID Renaming
+
+Original student to work on the data used SIDs specific to the dictator task. However, as I continued the analyses I kept running into problems when joining with the brain data where I could accidentally match the wrong behavioral file to the neuro data by inputting the wrong dictator sepcific ID. To avoid this, I changed all the behavioral files to include the neuro data identifier and use that in the rest of the repo, basically ignoring the original dictator SIDs. Saved me a lot of anxiety.
+
+```{r sid-renaming, echo = T}
+
+# filter out each subject, rename using correct IDs#
+
+behave_data_gp51 <- behave_data %>% filter(SID == "DG_s02") %>% mutate(sub = "GP51")
+behave_data_19 <- behave_data %>% filter(SID == "DG_s08") %>% mutate(sub = "IR19")
+behave_data_35 <- behave_data %>% filter(SID == "DG_s11") %>% mutate(sub = "IR35")
+behave_data_28 <- behave_data %>% filter(SID == "DG_s10") %>% mutate(sub = "IR28")
+behave_data_39 <- behave_data %>% filter(SID == "DG_s12") %>% mutate(sub = "IR39")
+behave_data_16 <- behave_data %>% filter(SID == "DG_s06") %>% mutate(sub = "IR16")
+behave_data_10 <- behave_data %>% filter(SID == "DG_s04") %>% mutate(sub = "IR10")
+behave_data_57 <- behave_data %>% filter(SID == "DG_s13") %>% mutate(sub = "IR57")
+behave_data_26 <- behave_data %>% filter(SID == "DG_s09") %>% mutate(sub = "IR26")
+behave_data_09 <- behave_data %>% filter(SID == "DG_s03") %>% mutate(sub = "IR9")
+behave_data_cp34 <- behave_data %>% filter(SID == "DG_s14") %>% mutate(sub = "CP34")
+behave_data_da8 <- behave_data %>% filter(SID == "DG_s15") %>% mutate(sub = "DA8")
+behave_data_da9 <- behave_data %>% filter(SID == "DG_s17") %>% mutate(sub = "DA9")
+behave_data_cp38 <- behave_data %>% filter(SID == "DG_s16") %>% mutate(sub = "CP38")
+behave_data_st40 <- behave_data %>% filter(SID == "DG_s01") %>% mutate(sub = "ST40")
+
+behave_data_short <- rbind(behave_data_gp51,
+                           behave_data_10, 
+                           behave_data_16, 
+                           behave_data_19, 
+                           behave_data_28, 
+                           behave_data_35, 
+                           behave_data_39, 
+                           behave_data_57, 
+                           behave_data_09, 
+                           behave_data_26, 
+                           behave_data_cp34, 
+                           behave_data_da8, 
+                           behave_data_da9, 
+                           behave_data_cp38, 
+                           behave_data_st40)
+```
+
+### Behavior is driven by task
+
+Looked at how choice is driven by inequity and self_var_payoff using a logistic mixed effects model. Tried both with and without self_var_payoff. Both significantly correlate with choice. For visualization in the paper, will just show the effect of inequity since that is primary for the remaining analyses. But will report in text with self. 
+
+```{r model-reporting}
+
+# only use OFC subjects #
+ofc_subs <- c("IR9", "IR16",  "IR26", "IR28", "IR35", "IR57", "IR39", "GP51", "DA9", "ST40")
+
+# prep df #
+behavioral_paper_plots_df <- behave_data_short %>%
+  filter(sub %in% ofc_subs) %>%
+  filter(!is.na(ineq_var)) %>%
+  select(ineq_var, sub, chose_equality, round, trial_type, self_var_payoff) %>%
+  distinct() %>%
+  group_by(ineq_var, sub) %>%
+  mutate(ten_ten = if_else(chose_equality == "10-10", 1, 0)) %>%
+  mutate(ten_count_sub = sum(ten_ten)) %>%
+  mutate(num_choices = n()) %>%
+  mutate(ten_prob_sub = ten_count_sub/num_choices) %>%
+  group_by(ineq_var) %>%
+  mutate(ten_prob_full = mean(ten_prob_sub)) %>%
+  mutate(ten_prob_max = ten_prob_full + sd(ten_prob_sub)/sqrt(n())) %>%
+  mutate(ten_prob_min = ten_prob_full - sd(ten_prob_sub)/sqrt(n()))
+
+# get % time chose equitable on dis trials only #
+dis_choice <- behave_data_short %>%
+  filter(sub %in% ofc_subs) %>%
+  filter(!is.na(ineq_var)) %>%
+  filter(trial_type == "Disadvantageous") %>%
+  select(sub, chose_equality, round) %>%
+  distinct() %>%
+  group_by( sub) %>%
+  mutate(ten_ten = if_else(chose_equality == "10-10", 1, 0)) %>%
+  mutate(ten_count_sub = sum(ten_ten)) %>%
+  mutate(num_choices = n()) %>%
+  mutate(ten_prob_sub = ten_count_sub/num_choices) %>%
+  ungroup() %>%
+  mutate(ten_prob_full = mean(ten_prob_sub)) %>%
+  mutate(ten_prob_sd = sd(ten_prob_sub)) %>%
+  mutate(ten_prob_max = ten_prob_full + sd(ten_prob_sub)/sqrt(n())) %>%
+  mutate(ten_prob_min = ten_prob_full - sd(ten_prob_sub)/sqrt(n()))
+
+
+## run mixed log models ##
+log_self_ttype_model <- glmer(ten_ten ~ self_var_payoff + ineq_var + (1|sub), 
+                         data = behavioral_paper_plots_df,
+                         family = binomial)
+summary(log_self_ttype_model)
+
+log_ttype_model <- glmer(ten_ten ~ ineq_var + (1|sub), 
+                         data = behavioral_paper_plots_df,
+                         family = binomial)
+summary(log_ttype_model)
+
+
+
+
+```
+
+
+```{r prob-plot}
+
+# figure 1.c.1
+ineq_figure <- behavioral_paper_plots_df %>%
+  ggplot(.) +
+  geom_smooth(aes(x = ineq_var, y = ten_prob_full), 
+              method = 'glm', method.args = list(family = "quasibinomial"), formula = 'y ~ x', 
+              color = "#2D2327", fill = 'grey') +
+  geom_linerange(aes(x = ineq_var, y = ten_prob_full, ymin = ten_prob_min, ymax = ten_prob_max), 
+                 color = '#2D2327', size =1) +
+  geom_point(aes(x = ineq_var, y = ten_prob_full), color = "#876194", size = 4) + #color = "#876194"
+  geom_vline(xintercept = 0, color = "#2D2327") +
+  geom_hline(yintercept = 0.5, color = "#2D2327") +
+  ylim(0, 1) +
+  labs(y = "Probability of Selecting Unequitable Option", x = "     Inequity",
+       title = "Inequity shapes patient choice") +
+  theme(panel.background = element_rect(fill= "white"), 
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 14), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 12), 
+        plot.title = element_text(family = "Georgia", color = '#2D2327', size = 15)) 
+
+# decided not to use
+# model_figure <- behavioral_paper_plots_df %>%
+#   ungroup() %>%
+#   mutate(y_pred = predict(log_model, type = "response")) %>%
+#   ggplot(., aes(x = y_pred, y = ten_prob)) +
+#   geom_smooth(method = "lm", formula = "y ~ x", color = "#FFB627") +
+#   geom_point(color = "#5EB7AB", size = 3) +
+#   ylim(0, 1) +
+#   labs(y = "Predicted Probability of Selecting 10 - 10", x = "True Probability of Selecting 10 - 10",
+#        subtitle = "y ~ self_varying_option + inequity", 
+#       title = "Accuracy of logistic regression predicting subject choice") +
+#   theme(panel.background = element_rect(fill= "white"), 
+#         plot.title = element_text(color = 'black', face = 'plain'))
+
+```
+
+
+### RTs
+
+Found differences between trial types in RT (Adv is faster) and well as with inequity within adv trials. Original analyes done in `reaction_times.Rmd`
+
+```{r rt-model}
+# set up #
+ofc_subs <- c("IR9", "IR16","IR26", "IR28", "IR35", "IR57", "IR39", "GP51", "DA9", "ST40")
+ggthemr("solarized")
+
+# prep df #
+behavioral_paper_rt_plots_df <- behave_data_short %>%
+  filter(sub %in% ofc_subs) %>%
+  filter(!is.na(RT)) %>%
+  filter(RT < 5) %>% # timeout after 5
+  filter(trial_type != "equality")
+
+# run model #
+maineffect_rt_model <- lmer(log(RT) ~ trial_type + ineq_var_abs  + (1|sub), 
+                             data = behavioral_paper_rt_plots_df)
+
+interact_rt_model <- lmer(log(RT) ~ trial_type + ineq_var_abs +  trial_type*ineq_var_abs + (1|sub), 
+                             data = behavioral_paper_rt_plots_df)
+
+# anova
+anova(maineffect_rt_model, interact_rt_model)
+
+# print the summary #
+summary(maineffect_rt_model)
+summary(interact_rt_model)
+
+# make df for plotting
+interact_rt_df <- tibble("predict" = predict(interact_rt_model),"ineq_var" = behavioral_paper_rt_plots_df$ineq_var, "trial_type" = behavioral_paper_rt_plots_df$trial_type)
+
+
+plot(predict(interact_rt_model) ~ behavioral_paper_rt_plots_df$ineq_var)
+
+behavioral_paper_rt_plots_df %>%
+  ggplot(., aes(y = log(RT), x = ineq_var, color = trial_type)) + 
+  geom_point() +
+  theme(panel.background = element_rect(fill = "white"))
+
+interact_rt_model_plot <- interact_rt_df %>%
+  ggplot(., aes(y = predict, x = ineq_var, color = trial_type)) + 
+  geom_point(size = 2) +
+  geom_smooth(aes(groups = trial_type), method = "lm", formula = "y ~ x", color = "black", fill = "grey") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  labs(y = "Predicted Reaction Time", 
+       x = "         Inequity",
+       # subtitle = "log(RT) ~ trial_type + unsigned_inequity + trial_type*unsigned_inequity + (1|subject)",
+       title = "Effects of Inequity Type and Inequity on Reaction Times", 
+       color = "Inequity Type") +
+  scale_y_continuous(limits = c(-.63, .63), breaks = c(-.6, 0, .6)) +
+  theme(panel.background = element_rect(fill = "white"), 
+        legend.position = "none",
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 14), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 12),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 12),
+        plot.subtitle =  element_text(family = "Georgia", color = '#2D2327', size = 12, face = "italic"),
+        # legend.title  = element_text(family = "Georgia", color = '#2D2327', size = 14),
+        plot.title = element_blank()) 
+
+
+
+interact_rt_plot <- behavioral_paper_rt_plots_df %>%
+  ggplot(., aes(y = log(RT), x = ineq_var, color = trial_type, fill = trial_type)) + 
+  geom_jitter(fill = "grey", width = .5) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "black") +
+  geom_smooth(aes(groups = trial_type), method = "lm", formula = "y ~ x", color = "black", fill = "grey") +
+  labs(y = "True Reaction Time", 
+       x = "         Inequity",
+       subtitle = "log(RT) ~ inequity_type + unsigned_inequity + inequity_type*unsigned_inequity + (1|subject)",
+       title = "Effects of Inequity Type and Absolute Inequity on Reaction Times", 
+       color = "Inequity Type") +
+  theme(panel.background = element_rect(fill = "white"), 
+        legend.position = "top",
+        axis.title.x = element_blank(), 
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_text(family = "Georgia", color = '#2D2327', size = 14), 
+        axis.text.y = element_text(family = "Georgia", color = '#2D2327', size = 12),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 12),
+        plot.subtitle =  element_text(family = "Georgia", color = '#2D2327', size = 12, face = "italic"),
+        legend.title  = element_text(family = "Georgia", color = '#2D2327', size = 14),
+        plot.title = element_text(family = "Georgia", color = '#2D2327', size = 15)) +
+  scale_color_manual(values = c("#5BA6D6", "#E4635C")) +
+  scale_fill_manual(values = c("#5BA6D6", "#E4635C"), guide = "none") +
+  scale_y_continuous(limits = c(-1.2, 1.6), breaks = c(-.9, 0, .9)) +
+  guides(color = guide_legend(override.aes = list(fill = "white")))
+
+
+rt_combined_plot <- arrangeGrob(grobs = list(interact_rt_plot, 
+                                       interact_rt_model_plot), nrow = 2, ncol = 1, heights = c(1.25, 1))
+
+
+```
+
+bin, ineq var show reduction only in adv
+
+```{r rt-plots}
+
+## plots ##
+trial_type_main_effect_plot <- behavioral_paper_rt_plots_df %>%
+  mutate(trial_type = factor(trial_type, levels =  c("Disadvantageous", "Advantageous"))) %>%
+  ggplot(., aes(x = trial_type, y = log(RT), color = trial_type, fill = trial_type)) +
+  geom_jitter() +
+  geom_boxplot(notch = T, color = '#2D2327') +
+  theme(panel.background = element_rect(fill= 'white'), 
+        legend.position = "none", 
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 14), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 12), 
+        plot.title = element_text(family = "Georgia", color = '#2D2327')) +
+  xlab("Trial Type") +
+  ylab("Log-transofrmed RT") + 
+  scale_fill_manual(values = c("#E4635C", "#5BA6D6")) +
+  scale_color_manual(values = c("#E4635C", "#5BA6D6")) +
+  ggtitle("Trial Type Difference in Response Time")
+
+
+adv_behave_df <- behave_data_short %>%
+  filter(sub %in% ofc_subs) %>%
+  filter(trial_type == "Advantageous") %>%
+  filter(!is.na(RT)) %>%
+  filter(RT < 5)
+
+adv_rts_plot <- adv_behave_df %>%
+  ggplot(., aes(x = log(RT), y = ineq_var)) +
+  geom_jitter(width = 0, height = 1.5, color = "#5BA6D6") +
+  geom_smooth(method = "lm", formula = "y ~ x", color = "#2D2327", fill = "grey") +
+  theme(panel.background = element_rect(fill= 'white'), 
+        axis.title = element_text(family = "Georgia",color = '#2D2327', size = 14), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 12), 
+        plot.title = element_text(family = "Georgia", color = '#2D2327'))  +
+  xlab("RT (in seconds)") +
+  ylab("Inequity") +
+  ggtitle("Adv. Inequity Predicts Response Time")
+
+
+```
+
+
+
+```{r save-combined-plot, echo = F}
+
+# first version #
+# ggsave(filename = path(here(), "figures", "paper", "behavioral_results.tif"),
+#      device = "tiff",
+#      width = 14,
+#      height = 6,
+#      units = "in",
+#      dpi = 300,
+#      plot =   arrangeGrob(grobs = list(ineq_figure, 
+#                                        trial_type_main_effect_plot, 
+#                                        adv_rts_plot), nrow = 1, ncol = 3))
+# 
+
+# second version #
+ggsave(filename = path(here(), "figures", "paper", "behavioral_results.tif"),
+     device = "tiff",
+     width = 12.1,
+     height = 6,
+     units = "in",
+     dpi = 300,
+     plot =   arrangeGrob(grobs = list(ineq_figure, 
+                                       rt_combined_plot), nrow = 1, ncol = 2, widths = c(1, 1.9)))
+
+
+
+plot(arrangeGrob(grobs = list(ineq_figure, 
+                                       interact_rt_model_plot), nrow = 1, ncol = 2, widths = c(1, 1.75)))
+
+```
+
+
+```{r trial-type-side}
+
+side_bias_df <- behave_data_short %>%
+  filter(sub %in% ofc_subs) %>%
+  filter(!is.na(RT)) %>%
+  filter(RT < 5)  %>%
+  group_by(sub) %>%
+  add_count(side_chosen) %>%
+  mutate(percent_side = n/n()) %>%
+  group_by(side_chosen) %>%
+  mutate(average_percent_side = mean(percent_side)) %>%
+  mutate(sd_percent_side = sd(percent_side)) %>%
+  select(sub, round, side_chosen, percent_side, average_percent_side, sd_percent_side)
+
+task_design_side_bias <- behave_data_short %>%
+  filter(sub == "IR57") %>% # example subject
+  select(starts_with("L_"), starts_with("R_"), trial_type, round) %>%
+  distinct() %>%
+  filter(trial_type != "equality") %>%
+  mutate(equitable_side = if_else(L_self == 10 & L_other == 10, "Left", "Right")) %>%
+  mutate(best_option_on_left = if_else(trial_type == "Advantageous" & equitable_side == "Right", 1, 
+                                       if_else(trial_type == "Disadvantageous" & equitable_side == "Left", 1, 0)))
+
+sum(task_design_side_bias$best_option_on_left)/228
+sum(task_design_side_bias$best_option_on_left)/204
+
+table(task_design_side_bias$equitable_side, task_design_side_bias$trial_type)
+
+table(task_design_side_bias$equitable_side)
+
+```
+
+```{r time-outs}
+
+time_out_df <- side_bias_df <- behave_data_short %>%
+  filter(sub %in% ofc_subs) %>%
+  mutate(timeout = if_else(RT > 5 | is.na(RT), 1, 0)) %>%
+  group_by(sub) %>%
+  add_count(timeout) %>%
+  group_by(timeout) %>%
+  mutate(timeout_average = mean(n)/228) %>%
+  mutate(timeout_sd = sd(n)/228) %>%
+  select(starts_with("time"), sub, round, n) %>%
+  distinct()
+
+```
+
+
+## EDA 
+
+The below analyses were conducted mostly in winter 2020 to determine if there were different behvaioral phenotypes of participants. Code is messy, as after it was written, we did a live coding session with Ming and Dvorah to further explore and understand results. Main takeaway was that all of our patients with OFC coverage had the same behavioral phenotype-- they all heavily avoided disadvantageous inequity even at a loss to themselves. can see this best in the `bheave-typea` chunk.
+
+```{r trial-types-plots, echo = F, eval = F}
+
+
+chose_plot <- behave_data_short %>%
+  ggplot(., aes(x = sub, fill = chose_equality, color = chose_equality)) +
+  geom_bar(position = position_dodge2()) +
+  theme(panel.background = element_rect(fill = "white")) +
+  scale_y_continuous(breaks = c(seq(from = 0, to = 150, by = 10)))
+
+summarized_disadvent_data <- behave_data_short %>%
+  filter(chose_equality == "Disadvent") %>%
+  group_by(sub) %>%
+  summarise_at(vars(self_payoff, self_foregone, other_payoff, other_foregone), function(x) sum(x))
+
+summarized_disadvent_data <- rbind(summarized_disadvent_data, c("IR35", rep(0, 4)))
+
+forgone_plot <- summarized_disadvent_data %>%
+  gather(key = "type", value = "amount", -sub) %>%
+  mutate(amount = as.numeric(amount)) %>%
+  ggplot(., aes(x = sub, y = amount, fill = type)) +
+  geom_col(position = position_dodge2()) +
+  theme(panel.background = element_rect(fill = "white"))
+
+ plot(arrangeGrob(grobs = list(ggplotGrob(chose_plot),
+                                ggplotGrob(forgone_plot)), nrow = 2, ncol = 1))
+
+```
+
+
+```{r inequity, fig.width = 8, fig.height = 5, echo = F, eval = F}
+
+behave_data_short %>%
+  group_by(ineq_ratio) %>%
+  summarise_at(vars(ineq_choice_abs, other_payoff), function(x) mean(x, na.rm = T)) %>%
+  gather(key = "type", value = "amount", -ineq_ratio) %>%
+  filter(ineq_ratio != 1) %>%
+  mutate(ineq_ratio = round(ineq_ratio, 3)) %>%
+  ggplot(., aes(x = as.factor(ineq_ratio), y = amount, fill = type)) +
+  geom_col(position = position_dodge2()) +
+  theme(panel.background = element_rect(fill = "white")) +
+  labs( y = "Amount", x = "Self : Other Ration")
+
+behave_data_short %>%
+  group_by(sub) %>%
+  mutate(mean_inequity = mean(ineq_choice_abs, na.rm = T)) %>%
+  mutate(mean_other_payoff = mean(other_payoff, na.rm = T)) %>%
+  ggplot(., aes(x = mean_other_payoff, y = mean_inequity, color = sub)) +
+  geom_point(size = 4) +
+  theme(panel.background = element_rect(fill = "white")) +
+  scale_color_manual(values = getPalette(15)) +
+  labs( y = "Inequity", x = "Average Other Payoff", color = "subject")
+
+
+
+behave_data_short %>%
+  group_by(sub) %>%
+  mutate(mean_dis_inequity = mean(ineq_disadvent_choice, na.rm = T)) %>%
+  mutate(mean_self_payoff = mean(self_payoff, na.rm = T)) %>%
+  ggplot(., aes(x = mean_self_payoff, y = mean_dis_inequity, color = sub)) +
+  geom_point(size = 4) +
+  theme(panel.background = element_rect(fill = "white")) +
+  scale_color_manual(values = getPalette(15)) +
+  labs( y = "Dis. Inequity", x = "Average Self Payoff", color = "subject")
+
+behave_data_short %>%
+  group_by(sub) %>%
+  mutate(mean_adv_inequity = mean(ineq_advent_choice, na.rm = T)) %>%
+  mutate(mean_self_payoff = mean(self_payoff, na.rm = T)) %>%
+  ggplot(., aes(x = mean_self_payoff, y = mean_adv_inequity, color = sub)) +
+  geom_point(size = 4) +
+  theme(panel.background = element_rect(fill = "white")) +
+  scale_color_manual(values = getPalette(15)) +
+  labs( y = "Adv. Inequity", x = "Average Self Payoff", color = "subject")
+```
+
+
+```{r average-pay-out, echo = F, fig.width = 10, fig.height = 8, eval = F}
+behave_data_short %>%
+  ggplot(., aes(x = sub, y = other_payoff, fill = sub)) +
+  geom_violin() +
+  geom_boxplot(width=0.1) +
+  scale_fill_manual(values = getPalette(15)) +
+  theme(panel.background = element_rect(fill = "white"))
+
+
+behave_data_short %>%
+  ggplot(., aes(x = sub, y = self_payoff, fill = sub)) +
+  geom_violin() +
+  geom_boxplot(width=0.1) +
+  scale_fill_manual(values = getPalette(11)) +
+  theme(panel.background = element_rect(fill = "white"))
+
+behave_data_short %>%
+  ggplot(., aes(x = sub, y = other_foregone, fill = sub)) +
+  geom_violin() +
+  geom_boxplot(width=0.1) +
+  scale_fill_manual(values = getPalette(11)) +
+  theme(panel.background = element_rect(fill = "white"))
+
+behave_data_short %>%
+  ggplot(., aes(x = sub, y = self_foregone, fill = sub)) +
+  geom_violin() +
+  geom_boxplot(width=0.1) +
+  scale_fill_manual(values = getPalette(11)) +
+  theme(panel.background = element_rect(fill = "white"))
+
+
+# behave_data_short %>%
+#   ggplot(., aes(x = self_payoff, y = self_foregone, fill = sub)) +
+#   geom_violin() +
+#   geom_boxplot(width=0.1) +
+#   scale_fill_manual(values = getPalette(11)) +
+#   theme(panel.background = element_rect(fill = "white"))
+
+```
+
+
+```{r bheave-typea, eval = F}
+
+behave_types_plot <- behave_data_short %>%
+  mutate(left_option = L_self + L_other) %>%
+  mutate(right_option = R_self + R_other) %>%
+  mutate(left_ineq = abs(L_self - L_other)) %>%
+  mutate(right_ineq =abs(R_self - R_other)) %>%
+  mutate(selfish = if_else((L_self >= R_self & side_chosen == "Left" ) |
+                              (R_self >= L_self & side_chosen == "Right"), "yes", "no" )) %>%
+  mutate(value_maximize = if_else((left_option > right_option & side_chosen == "Left" ) |
+                              (right_option > left_option & side_chosen == "Right"), "yes", "no" )) %>%
+  mutate(ineq_minimize =  if_else((left_ineq < right_ineq & side_chosen == "Left" ) |
+                              (right_ineq < left_ineq & side_chosen == "Right"), "yes", "no" )) %>%
+  select(sub, selfish, value_maximize, ineq_minimize, trial_type) %>%
+  gather(key = "type", value = "choice", -sub, -trial_type) %>%
+  filter(choice == "yes") %>%
+  ggplot(., aes(x = sub, fill = type)) +
+  geom_bar(position = position_dodge()) +
+  theme(panel.background = element_rect(fill = "white")) +
+  facet_wrap(~trial_type)
+
+chose_trial_plot <- behave_data_short %>%
+  ggplot(., aes(x = sub, fill = chose_equality, color = chose_equality)) +
+  geom_bar(position = position_dodge2()) +
+  theme(panel.background = element_rect(fill = "white")) +
+  scale_y_continuous(breaks = c(seq(from = 0, to = 150, by = 10)))
+
+
+ plot(arrangeGrob(grobs = list(ggplotGrob(behave_types_plot),
+                                ggplotGrob(chose_trial_plot)), nrow = 2, ncol = 1))
+ 
+
+
+
+```
+
+
+
+
+
