@@ -1,0 +1,806 @@
+---
+title: "Split * Unified Encoding Overlap"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo <- FALSE,  # don't print the code chunk
+  warning <- FALSE,  # don't print warnings
+  message <- FALSE,  # don't print messages
+  fig.width <- 5,  # set default width of figures
+  fig.height <- 8,  # set default height of figures
+  fig.align <- "center",  # always align figure in center
+  fig.pos <- "H",  # always plot figure at the exact location of the code chunk
+  cache <- FALSE)  # cache results
+
+## libraries ##
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+# library(summarytools)
+library(ggthemr)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(wesanderson)
+library(ggsci)
+library(zoo)
+library(kableExtra)
+library(lme4)
+library(RColorBrewer)
+library(doParallel)
+library(parallel)
+library(foreach)
+library(here)
+library(fs)
+library(ggcorrplot)
+library(viridis)
+library(lmtest)
+library(gt)
+library(ggalluvial)
+library(parameters)
+library(factoextra)
+library(NbClust)
+
+## hand written functions ##
+source(path(here(), "R", "load_behave_data.R"))
+source(path(here(), "R", "prep_behave_data.R"))
+source(path(here(), "R", "stretch_start_end.R"))
+source(path(here(), "R", "load_high_gamma_data.R"))
+source(path(here(), "R", "rolling_window_and_baseline.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+# source('~/Projects/nice_r_functions/ggpaired_pretty.R')
+source(path(here(), "R", 'mutate_cond.R'))
+source(path(here(), "R", "load_and_collate_reg_results.R"))
+
+
+
+## plotting helpers ##
+ggthemr("solarized")
+getPalette = colorRampPalette(brewer.pal(9, "Set1"))
+
+c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+
+# ## parallelization ##
+# nCores <- 4
+# registerDoParallel(nCores)
+# 
+
+
+#find . -type f -mtime +10 -maxdepth 1 -exec mv {} before_3-21-21 \;
+```
+
+
+## Overlap between Split and Unified Encoding
+
+There are two types of overlap to be an analyzed in this document. The first is when an electrode was marked as a unified encoding electrode, but this was really driven by such strong encoding in one trial type that it overcame the lack of effect in the other trial type. The second is when sn electrode as marked as a split encoding electrode, when it really was using a unified encoding scheme for a different predictor.
+
+
+```{r load-data}
+## split results ##
+# load permuted regressor results #
+split_ofc_encoding_reg_df <- read_csv(path(here(), "results", "single_regressions",
+                                       "compiled_ofc_ogpermutation_wpvalues_single_regressions_1_28_2022.csv"))
+
+# load permuted trial results #
+split_ofc_encoding_ttype_df <- read_csv(path(here(), "results", "single_regressions",
+                                       "compiled_ofc_ogpermutation_ttype_wpvalues_single_regressions_1_28_2022.csv"))
+
+# rename test stats and combine #
+split_ofc_encoding_reg_df <- split_ofc_encoding_reg_df %>%
+  rename(test_stat_real_reg = test_stat_real) %>%
+  rename(permuted_p_reg = permuted_p)
+
+split_ofc_encoding_ttype_df <- split_ofc_encoding_ttype_df %>%
+  rename(test_stat_real_ttype = test_stat_real) %>%
+  rename(permuted_p_ttype = permuted_p)
+
+split_ofc_encoding_df <- full_join(split_ofc_encoding_reg_df, split_ofc_encoding_ttype_df)
+
+
+## unified results ##
+unified_hfa_data <- read_csv(path(here(), "results", "single_regressions",
+                                  "compiled_unified_ogpermutation_ofc_results_1_26_2022.csv"))
+
+```
+
+
+```{r prep-dfs}
+
+## prep unified ##
+unified_hfa_data_clean <- unified_hfa_data %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  mutate(reg_id = paste(subject, electrode, predictor, epoch, sep = "_")) 
+
+unified_hfa_data_fdr <- unified_hfa_data_clean %>%
+  select(reg_id, subject, electrode, predictor, epoch, perm_p) %>%
+  distinct() %>%
+  group_by(epoch, predictor) %>%
+  mutate(perm_p_unified_fdr = p.adjust(perm_p, method = "fdr"))
+
+## prep split ##
+split_ofc_encoding_clean<- split_ofc_encoding_df %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  mutate(reg_id = paste(subject, electrode, predictor, epoch, sep = "_"))
+
+split_ofc_encoding_fdr <- split_ofc_encoding_clean %>%
+  select(reg_id, subject, electrode, predictor, epoch, permuted_p_reg, permuted_p_ttype) %>%
+  distinct() %>%
+  group_by(epoch, predictor) %>%
+  mutate(perm_p_reg_fdr = p.adjust(permuted_p_reg, method = "fdr")) %>%
+  mutate(perm_p_ttype_fdr = p.adjust(permuted_p_ttype, method = "fdr"))
+
+## combine
+hfa_encoding_df <- left_join(split_ofc_encoding_fdr, unified_hfa_data_fdr)
+
+
+
+```
+
+
+```{r load-raw-hfa-data, echo = F}
+
+# load hfa data #
+all_brain_data_pres <-  read_csv(path(here(), "/munge/all_brain_data_pres_1_3_2022.csv"), 
+                                 col_types = cols())
+all_brain_data_pre_choice <-  read_csv(path(here(), "/munge/all_brain_data_pre_choice_1_3_2022.csv"), 
+                                       col_types = cols())
+all_brain_data_post_choice <-  read_csv(path(here(), "/munge/all_brain_data_post_choice_1_3_2022.csv"),
+                                        col_types = cols())
+
+```
+
+
+## Split encoding mischaracterized as Unified
+
+```{r comparing-encoding-strats}
+
+hfa_encoding_compare_df <- hfa_encoding_df %>%
+  select(-perm_p) %>%
+  filter(predictor %in% c("max", "min", "other_var_payoff", "self_var_payoff")) %>%
+  mutate(overlap = if_else(perm_p_unified_fdr < 0.05 & perm_p_ttype_fdr < 0.05 & perm_p_reg_fdr < 0.05, "both", 
+                           if_else(perm_p_ttype_fdr < 0.05 & perm_p_reg_fdr < 0.05, "split",
+                                   if_else(perm_p_unified_fdr < 0.05, "unified", "neither")))) 
+
+both_sig_df <- hfa_encoding_compare_df %>%
+  filter(overlap == "both")
+
+post_both_df <- both_sig_df %>%
+  filter(epoch == "post-choice") 
+
+for(sub in unique(post_both_df$subject)) {
+  
+  both_sig_sub <- post_both_df %>%
+    filter(subject == sub) 
+  
+  for(elec in unique(both_sig_sub$electrode)) {
+    
+    both_sig_sub_elec <- both_sig_sub %>%
+      filter(electrode == elec) 
+    
+    brain_behave_elec <- all_brain_data_post_choice %>%
+      filter(subject == sub & electrodes == elec)
+    
+    for(pred in unique(both_sig_sub_elec$predictor)){
+      
+     adv_plot <-  brain_behave_elec %>%
+        filter(trial_type == "Advantageous") %>%
+        pivot_longer(cols = starts_with("post"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes_string(x = pred)) +
+        geom_point(aes(y = HFA), color = "#5BA6D6") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white"), axis.title.x = element_blank()) +
+        facet_wrap(~time, nrow = 1) + 
+        scale_x_continuous(n.breaks = 3) +
+        ggtitle(paste(sub, elec, sep = " "))
+      
+      dis_plot <-  brain_behave_elec %>%
+        filter(trial_type == "Disadvantageous") %>%
+        pivot_longer(cols = starts_with("post"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes_string(x = pred)) +
+        geom_point(aes(y = HFA), color = "#E4635C") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white")) +
+        scale_x_continuous(n.breaks = 3) +
+        facet_wrap(~time, nrow = 1)
+      
+         
+       print(plot( arrangeGrob(grobs = list(adv_plot,dis_plot), nrow = 2, ncol = 1)))
+
+      
+      
+    }
+
+  }
+  
+}
+
+```
+
+```{r num-of-elecs}
+
+both_sig_elecs <- both_sig_df %>%
+  mutate(elec_ids = paste0(subject, "_", electrode)) %>%
+  mutate(reg_id = paste(subject, electrode, predictor, epoch, sep = "_")) %>%
+  pull(reg_id)
+
+```
+
+
+
+
+## Unified encoding mischaracterized as Split
+
+self, adv => max
+self, dis => min
+
+other, dis => max
+other, adv => min
+
+```{r prep-dfs-2}
+
+scatter_plot_r2_df <- split_ofc_encoding_df %>%
+  group_by(reg_id) %>%
+  mutate(mean_adv = mean(Advantageous)) %>%
+  mutate(mean_dis = mean(Disadvantageous)) %>%
+  select(mean_adv, mean_dis, reg_id) %>%
+  distinct() 
+
+scatter_plot_r2_fdr_df <- left_join(scatter_plot_r2_df, split_ofc_encoding_fdr)
+
+
+scatter_plot_r2_fdr_df <- scatter_plot_r2_fdr_df %>%
+  mutate(sig = if_else(mean_dis > mean_adv & perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05, "Disadvantageous", 
+                       if_else(mean_adv >= mean_dis & perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05, "Advantegous",
+                               "Not Sig.")))
+
+
+```
+
+### Unified Max Encoding
+
+```{r  unified-max}
+
+max_unified_df <- hfa_encoding_df %>%
+  ungroup() %>%
+  filter(predictor == "max") %>%
+  select(subject, electrode, epoch, perm_p_unified_fdr) %>%
+  rename(max_unified_p  = perm_p_unified_fdr)
+
+split_v_uni_max_df <- full_join(scatter_plot_r2_fdr_df, max_unified_df)
+
+# filter to relevant conditions
+split_v_uni_max_df <- split_v_uni_max_df %>%
+  filter(max_unified_p < 0.05) %>%
+  filter(sig != "Not Sig.") %>%
+  filter((predictor == "self_var_payoff" & sig == "Advantageous") |
+           (predictor == "other_var_payoff" & sig == "Disadvantageous"))
+
+# save to cssv #
+write_csv(split_v_uni_max_df, path(here(), "results", "unified_max_split_elecs.csv"))
+```
+
+```{r viz-max-uni-encoding}
+
+pre_both_df <- split_v_uni_max_df %>%
+  filter(epoch == "presentation") 
+
+for(sub in unique(pre_both_df$subject)) {
+  
+  pre_both_sub_df <- pre_both_df %>%
+    filter(subject == sub) 
+  
+  for(elec in unique(pre_both_sub_df$electrode)) {
+    
+    both_sig_sub_elec <- pre_both_sub_df %>%
+      filter(electrode == elec) 
+    
+    brain_behave_elec <- all_brain_data_pres %>%
+      filter(subject == sub & electrodes == elec)
+    
+    for(pred in unique(both_sig_sub_elec$predictor)){
+      
+     adv_plot <-  brain_behave_elec %>%
+        filter(trial_type == "Advantageous") %>%
+        pivot_longer(cols = starts_with("bin_"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("bin_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes_string(x = pred)) +
+        geom_point(aes(y = HFA), color = "#5BA6D6") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white"), axis.title.x = element_blank()) +
+        facet_wrap(~time, nrow = 1) + 
+        scale_x_continuous(n.breaks = 3) +
+        ggtitle(paste(sub, elec, sep = " "))
+      
+      dis_plot <-  brain_behave_elec %>%
+        filter(trial_type == "Disadvantageous") %>%
+        pivot_longer(cols = starts_with("bin_"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("bin_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes_string(x = pred)) +
+        geom_point(aes(y = HFA), color = "#E4635C") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white")) +
+        scale_x_continuous(n.breaks = 3) +
+        facet_wrap(~time, nrow = 1)
+      
+      adv_plot_max <-  brain_behave_elec %>%
+        filter(trial_type == "Advantageous") %>%
+        pivot_longer(cols = starts_with("bin_"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("bin_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes(x = max)) +
+        geom_point(aes(y = HFA), color = "#5BA6D6") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white"), axis.title.x = element_blank()) +
+        facet_wrap(~time, nrow = 1) + 
+        scale_x_continuous(n.breaks = 3) +
+        ggtitle(paste(sub, elec, sep = " "))
+      
+      dis_plot_max <-  brain_behave_elec %>%
+        filter(trial_type == "Disadvantageous") %>%
+        pivot_longer(cols = starts_with("bin_"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("bin_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes(x = max)) +
+        geom_point(aes(y = HFA), color = "#E4635C") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white")) +
+        scale_x_continuous(n.breaks = 3) +
+        facet_wrap(~time, nrow = 1)
+      
+         
+       print(plot( arrangeGrob(grobs = list(adv_plot,adv_plot_max, dis_plot, dis_plot_max), nrow = 2, ncol = 2)))
+
+      
+      
+    }
+
+  }
+  
+}
+
+pre_both_df <- split_v_uni_max_df %>%
+  filter(epoch == "pre-choice") 
+
+for(sub in unique(pre_both_df$subject)) {
+  
+  pre_both_sub_df <- pre_both_df %>%
+    filter(subject == sub) 
+  
+  for(elec in unique(pre_both_sub_df$electrode)) {
+    
+    both_sig_sub_elec <- pre_both_sub_df %>%
+      filter(electrode == elec) 
+    
+    brain_behave_elec <- all_brain_data_pre_choice %>%
+      filter(subject == sub & electrodes == elec)
+    
+    for(pred in unique(both_sig_sub_elec$predictor)){
+      
+     adv_plot <-  brain_behave_elec %>%
+        filter(trial_type == "Advantageous") %>%
+        pivot_longer(cols = starts_with("pre"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("pre_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes_string(x = pred)) +
+        geom_point(aes(y = HFA), color = "#5BA6D6") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white"), axis.title.x = element_blank()) +
+        facet_wrap(~time, nrow = 1) + 
+        scale_x_continuous(n.breaks = 3) +
+        ggtitle(paste(sub, elec, sep = " "))
+      
+      dis_plot <-  brain_behave_elec %>%
+        filter(trial_type == "Disadvantageous") %>%
+        pivot_longer(cols = starts_with("pre"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("pre_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes_string(x = pred)) +
+        geom_point(aes(y = HFA), color = "#E4635C") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white")) +
+        scale_x_continuous(n.breaks = 3) +
+        facet_wrap(~time, nrow = 1)
+      
+      adv_plot_max <-  brain_behave_elec %>%
+        filter(trial_type == "Advantageous") %>%
+        pivot_longer(cols = starts_with("pre"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("pre_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes(x = max)) +
+        geom_point(aes(y = HFA), color = "#5BA6D6") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white"), axis.title.x = element_blank()) +
+        facet_wrap(~time, nrow = 1) + 
+        scale_x_continuous(n.breaks = 3) +
+        ggtitle(paste(sub, elec, sep = " "))
+      
+      dis_plot_max <-  brain_behave_elec %>%
+        filter(trial_type == "Disadvantageous") %>%
+        pivot_longer(cols = starts_with("pre"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("pre_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes(x = max)) +
+        geom_point(aes(y = HFA), color = "#E4635C") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white")) +
+        scale_x_continuous(n.breaks = 3) +
+        facet_wrap(~time, nrow = 1)
+      
+         
+       print(plot( arrangeGrob(grobs = list(adv_plot,adv_plot_max, dis_plot, dis_plot_max), nrow = 2, ncol = 2)))
+
+      
+      
+    }
+
+  }
+  
+}
+
+pre_both_df <- split_v_uni_max_df %>%
+  filter(epoch == "post-choice") 
+
+for(sub in unique(pre_both_df$subject)) {
+  
+  pre_both_sub_df <- pre_both_df %>%
+    filter(subject == sub) 
+  
+  for(elec in unique(pre_both_sub_df$electrode)) {
+    
+    both_sig_sub_elec <- pre_both_sub_df %>%
+      filter(electrode == elec) 
+    
+    brain_behave_elec <- all_brain_data_post_choice %>%
+      filter(subject == sub & electrodes == elec)
+    
+    for(pred in unique(both_sig_sub_elec$predictor)){
+      
+     adv_plot <-  brain_behave_elec %>%
+        filter(trial_type == "Advantageous") %>%
+        pivot_longer(cols = starts_with("post"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes_string(x = pred)) +
+        geom_point(aes(y = HFA), color = "#5BA6D6") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white"), axis.title.x = element_blank()) +
+        facet_wrap(~time, nrow = 1) + 
+        scale_x_continuous(n.breaks = 3) +
+        ggtitle(paste(sub, elec, sep = " "))
+      
+      dis_plot <-  brain_behave_elec %>%
+        filter(trial_type == "Disadvantageous") %>%
+        pivot_longer(cols = starts_with("post"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes_string(x = pred)) +
+        geom_point(aes(y = HFA), color = "#E4635C") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white")) +
+        scale_x_continuous(n.breaks = 3) +
+        facet_wrap(~time, nrow = 1)
+      
+      adv_plot_max <-  brain_behave_elec %>%
+        filter(trial_type == "Advantageous") %>%
+        pivot_longer(cols = starts_with("post"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes(x = max)) +
+        geom_point(aes(y = HFA), color = "#5BA6D6") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white"), axis.title.x = element_blank()) +
+        facet_wrap(~time, nrow = 1) + 
+        scale_x_continuous(n.breaks = 3) +
+        ggtitle(paste(sub, elec, sep = " "))
+      
+      dis_plot_max <-  brain_behave_elec %>%
+        filter(trial_type == "Disadvantageous") %>%
+        pivot_longer(cols = starts_with("post"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes(x = max)) +
+        geom_point(aes(y = HFA), color = "#E4635C") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white")) +
+        scale_x_continuous(n.breaks = 3) +
+        facet_wrap(~time, nrow = 1)
+      
+         
+       print(plot( arrangeGrob(grobs = list(adv_plot,adv_plot_max, dis_plot, dis_plot_max), nrow = 2, ncol = 2)))
+
+      
+      
+    }
+
+  }
+  
+}
+
+```
+
+### Unified Min Encoding
+
+```{r  unified-min}
+
+min_unified_df <- hfa_encoding_df %>%
+  ungroup() %>%
+  filter(predictor == "min") %>%
+  select(subject, electrode, epoch, perm_p_unified_fdr) %>%
+  rename(min_unified_p  = perm_p_unified_fdr)
+
+split_v_uni_min_df <- full_join(scatter_plot_r2_fdr_df, min_unified_df)
+
+# filter to relevant conditions
+split_v_uni_min_df <- split_v_uni_min_df %>%
+  filter(min_unified_p < 0.05) %>%
+  filter(sig != "Not Sig.") %>%
+  filter((predictor == "other_var_payoff" & sig == "Advantageous") |
+           (predictor == "dis_var_payoff" & sig == "Disadvantageous"))
+
+
+```
+
+```{r viz-min-uni-encoding}
+
+pre_both_df <- split_v_uni_min_df %>%
+  filter(epoch == "presentation") 
+
+for(sub in unique(pre_both_df$subject)) {
+  
+  pre_both_sub_df <- pre_both_df %>%
+    filter(subject == sub) 
+  
+  for(elec in unique(pre_both_sub_df$electrode)) {
+    
+    both_sig_sub_elec <- pre_both_sub_df %>%
+      filter(electrode == elec) 
+    
+    brain_behave_elec <- all_brain_data_pres %>%
+      filter(subject == sub & electrodes == elec)
+    
+    for(pred in unique(both_sig_sub_elec$predictor)){
+      
+     adv_plot <-  brain_behave_elec %>%
+        filter(trial_type == "Advantageous") %>%
+        pivot_longer(cols = starts_with("bin_"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("bin_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes_string(x = pred)) +
+        geom_point(aes(y = HFA), color = "#5BA6D6") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white"), axis.title.x = element_blank()) +
+        facet_wrap(~time, nrow = 1) + 
+        scale_x_continuous(n.breaks = 3) +
+        ggtitle(paste(sub, elec, sep = " "))
+      
+      dis_plot <-  brain_behave_elec %>%
+        filter(trial_type == "Disadvantageous") %>%
+        pivot_longer(cols = starts_with("bin_"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("bin_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes_string(x = pred)) +
+        geom_point(aes(y = HFA), color = "#E4635C") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white")) +
+        scale_x_continuous(n.breaks = 3) +
+        facet_wrap(~time, nrow = 1)
+      
+      adv_plot_min <-  brain_behave_elec %>%
+        filter(trial_type == "Advantageous") %>%
+        pivot_longer(cols = starts_with("bin_"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("bin_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes(x = min)) +
+        geom_point(aes(y = HFA), color = "#5BA6D6") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white"), axis.title.x = element_blank()) +
+        facet_wrap(~time, nrow = 1) + 
+        scale_x_continuous(n.breaks = 3) +
+        ggtitle(paste(sub, elec, sep = " "))
+      
+      dis_plot_min <-  brain_behave_elec %>%
+        filter(trial_type == "Disadvantageous") %>%
+        pivot_longer(cols = starts_with("bin_"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("bin_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes(x = min)) +
+        geom_point(aes(y = HFA), color = "#E4635C") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white")) +
+        scale_x_continuous(n.breaks = 3) +
+        facet_wrap(~time, nrow = 1)
+      
+         
+       print(plot( arrangeGrob(grobs = list(adv_plot,adv_plot_min, dis_plot, dis_plot_min), nrow = 2, ncol = 2)))
+
+      
+      
+    }
+
+  }
+  
+}
+
+pre_both_df <- split_v_uni_min_df %>%
+  filter(epoch == "pre-choice") 
+
+for(sub in unique(pre_both_df$subject)) {
+  
+  pre_both_sub_df <- pre_both_df %>%
+    filter(subject == sub) 
+  
+  for(elec in unique(pre_both_sub_df$electrode)) {
+    
+    both_sig_sub_elec <- pre_both_sub_df %>%
+      filter(electrode == elec) 
+    
+    brain_behave_elec <- all_brain_data_pre_choice %>%
+      filter(subject == sub & electrodes == elec)
+    
+    for(pred in unique(both_sig_sub_elec$predictor)){
+      
+     adv_plot <-  brain_behave_elec %>%
+        filter(trial_type == "Advantageous") %>%
+        pivot_longer(cols = starts_with("pre"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("pre_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes_string(x = pred)) +
+        geom_point(aes(y = HFA), color = "#5BA6D6") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white"), axis.title.x = element_blank()) +
+        facet_wrap(~time, nrow = 1) + 
+        scale_x_continuous(n.breaks = 3) +
+        ggtitle(paste(sub, elec, sep = " "))
+      
+      dis_plot <-  brain_behave_elec %>%
+        filter(trial_type == "Disadvantageous") %>%
+        pivot_longer(cols = starts_with("pre"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("pre_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes_string(x = pred)) +
+        geom_point(aes(y = HFA), color = "#E4635C") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white")) +
+        scale_x_continuous(n.breaks = 3) +
+        facet_wrap(~time, nrow = 1)
+      
+      adv_plot_min <-  brain_behave_elec %>%
+        filter(trial_type == "Advantageous") %>%
+        pivot_longer(cols = starts_with("pre"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("pre_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes(x = min)) +
+        geom_point(aes(y = HFA), color = "#5BA6D6") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white"), axis.title.x = element_blank()) +
+        facet_wrap(~time, nrow = 1) + 
+        scale_x_continuous(n.breaks = 3) +
+        ggtitle(paste(sub, elec, sep = " "))
+      
+      dis_plot_min <-  brain_behave_elec %>%
+        filter(trial_type == "Disadvantageous") %>%
+        pivot_longer(cols = starts_with("pre"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("pre_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes(x = min)) +
+        geom_point(aes(y = HFA), color = "#E4635C") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white")) +
+        scale_x_continuous(n.breaks = 3) +
+        facet_wrap(~time, nrow = 1)
+      
+         
+       print(plot( arrangeGrob(grobs = list(adv_plot,adv_plot_min, dis_plot, dis_plot_min), nrow = 2, ncol = 2)))
+
+      
+      
+    }
+
+  }
+  
+}
+
+pre_both_df <- split_v_uni_min_df %>%
+  filter(epoch == "post-choice") 
+
+for(sub in unique(pre_both_df$subject)) {
+  
+  pre_both_sub_df <- pre_both_df %>%
+    filter(subject == sub) 
+  
+  for(elec in unique(pre_both_sub_df$electrode)) {
+    
+    both_sig_sub_elec <- pre_both_sub_df %>%
+      filter(electrode == elec) 
+    
+    brain_behave_elec <- all_brain_data_post_choice %>%
+      filter(subject == sub & electrodes == elec)
+    
+    for(pred in unique(both_sig_sub_elec$predictor)){
+      
+     adv_plot <-  brain_behave_elec %>%
+        filter(trial_type == "Advantageous") %>%
+        pivot_longer(cols = starts_with("post"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes_string(x = pred)) +
+        geom_point(aes(y = HFA), color = "#5BA6D6") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white"), axis.title.x = element_blank()) +
+        facet_wrap(~time, nrow = 1) + 
+        scale_x_continuous(n.breaks = 3) +
+        ggtitle(paste(sub, elec, sep = " "))
+      
+      dis_plot <-  brain_behave_elec %>%
+        filter(trial_type == "Disadvantageous") %>%
+        pivot_longer(cols = starts_with("post"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes_string(x = pred)) +
+        geom_point(aes(y = HFA), color = "#E4635C") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white")) +
+        scale_x_continuous(n.breaks = 3) +
+        facet_wrap(~time, nrow = 1)
+      
+      adv_plot_min <-  brain_behave_elec %>%
+        filter(trial_type == "Advantageous") %>%
+        pivot_longer(cols = starts_with("post"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes(x = min)) +
+        geom_point(aes(y = HFA), color = "#5BA6D6") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white"), axis.title.x = element_blank()) +
+        facet_wrap(~time, nrow = 1) + 
+        scale_x_continuous(n.breaks = 3) +
+        ggtitle(paste(sub, elec, sep = " "))
+      
+      dis_plot_min <-  brain_behave_elec %>%
+        filter(trial_type == "Disadvantageous") %>%
+        pivot_longer(cols = starts_with("post"), values_to = "HFA", names_to = "bin") %>%
+        mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+        filter(time <= 1000) %>%
+        ggplot(., aes(x = min)) +
+        geom_point(aes(y = HFA), color = "#E4635C") +
+        geom_smooth(aes(y = HFA), color = 'black', fill = 'grey', method = "lm", formula = 'y ~ x') +
+        theme(panel.background = element_rect(fill = "white")) +
+        scale_x_continuous(n.breaks = 3) +
+        facet_wrap(~time, nrow = 1)
+      
+         
+       print(plot( arrangeGrob(grobs = list(adv_plot,adv_plot_min, dis_plot, dis_plot_min), nrow = 2, ncol = 2)))
+
+      
+      
+    }
+
+  }
+  
+}
+
+```
+
+

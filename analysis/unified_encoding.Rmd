@@ -1,0 +1,500 @@
+---
+title: "Unified"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo <- FALSE,  # don't print the code chunk
+  warning <- FALSE,  # don't print warnings
+  message <- FALSE,  # don't print messages
+  fig.width <- 5,  # set default width of figures
+  fig.height <- 8,  # set default height of figures
+  fig.align <- "center",  # always align figure in center
+  fig.pos <- "H",  # always plot figure at the exact location of the code chunk
+  cache <- FALSE)  # cache results
+
+## libraries ##
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+# library(summarytools)
+library(ggthemr)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(wesanderson)
+library(ggsci)
+library(zoo)
+library(kableExtra)
+library(lme4)
+library(RColorBrewer)
+library(doParallel)
+library(parallel)
+library(foreach)
+library(here)
+library(fs)
+library(ggcorrplot)
+library(viridis)
+library(lmtest)
+library(gt)
+library(ggalluvial)
+library(parameters)
+library(factoextra)
+library(NbClust)
+
+## hand written functions ##
+source(path(here(), "R", "load_behave_data.R"))
+source(path(here(), "R", "prep_behave_data.R"))
+source(path(here(), "R", "stretch_start_end.R"))
+source(path(here(), "R", "load_high_gamma_data.R"))
+source(path(here(), "R", "rolling_window_and_baseline.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+# source('~/Projects/nice_r_functions/ggpaired_pretty.R')
+source(path(here(), "R", 'mutate_cond.R'))
+source(path(here(), "R", "load_and_collate_reg_results.R"))
+
+
+
+## plotting helpers ##
+ggthemr("solarized")
+getPalette = colorRampPalette(brewer.pal(9, "Set1"))
+
+c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+
+# ## parallelization ##
+# nCores <- 4
+# registerDoParallel(nCores)
+# 
+
+
+#find . -type f -mtime +10 -maxdepth 1 -exec mv {} before_3-21-21 \;
+```
+
+## Load and prep data
+
+```{r load-unified-data}
+
+unified_hfa_data <- read_csv(path(here(), "results", "single_regressions",
+                                  "compiled_unified_ogpermutation_ofc_results_1_26_2022.csv"))
+
+
+```
+
+## HFA
+
+```{r sig-figures-hfa}
+
+## preds to use ##
+best_preds <- c("other_var_payoff", "self_var_payoff", "max", "min", "trial_type", "ineq_var_abs")
+
+
+## prep dfs ##
+unified_hfa_data_clean<- unified_hfa_data %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  mutate(reg_id = paste(subject, electrode, predictor, epoch, sep = "_")) 
+  #filter(!reg_id %in% both_sig_elecs) # does not include elecs that were also sig for split, does not change pattern of results
+
+unified_hfa_data_sig <- unified_hfa_data_clean %>%
+  filter(perm_p < 0.05) %>%
+  select(subject, electrode, predictor, epoch, perm_p) %>%
+  distinct() %>%
+  group_by(predictor, epoch) %>%
+  mutate(sig_count = n()) %>%
+  mutate(percent_of_elecs = (sig_count/ 136) * 100)
+
+unified_hfa_data_best_sig <- unified_hfa_data_clean %>%
+  filter(predictor %in% best_preds) %>%
+  filter(perm_p < 0.05) %>%
+  select(subject, electrode, predictor, epoch, perm_p) %>%
+  distinct() %>%
+  group_by(predictor, epoch) %>%
+  mutate(sig_count_per_epoch = n()) %>%
+  mutate(percent_of_elecs_per_epoch = (sig_count_per_epoch/ 136) * 100) %>%
+  group_by(predictor) %>%
+  mutate(sig_count = n()) %>%
+  mutate(percent_of_elecs = (sig_count/ 136) * 100) %>%
+  select(predictor, epoch, sig_count_per_epoch, percent_of_elecs_per_epoch, sig_count, percent_of_elecs) %>%
+  distinct()
+
+
+## plot percent unified electrodes (not corrected)
+unified_hfa_data_sig %>%
+  filter(predictor %in% best_preds) %>%
+  ggplot(., aes(x = predictor, fill = predictor)) +
+  geom_hline(yintercept = 5, linetype = "dashed") +
+  geom_bar(aes(y = after_stat( (count / 136) * 100))) +
+  theme(axis.text.x = element_blank(), panel.background = element_rect(fill = "white")) +
+  facet_wrap(~epoch) +
+  labs(y = "Percentage of Electrodes", subtitle = "Best  Predictors",x = "predictors") +
+  scale_fill_manual(values = getPalette(6)) +
+  ggtitle("HFA Unified Encoding")
+
+## plot percent unified electrodes by subject (not corrected)
+unified_hfa_data_clean %>%
+  select(subject, electrode, predictor, epoch, perm_p) %>%
+  distinct() %>%
+  filter(predictor %in% best_preds) %>%
+  group_by(predictor, subject) %>%
+  mutate(percent_sub_elecs = sum(perm_p < 0.05)/n()) %>%
+  select(subject, predictor, percent_sub_elecs) %>%
+  distinct() %>%
+  ggplot(., aes(x = predictor, y = percent_sub_elecs, fill = predictor)) +
+  geom_col() +
+  theme(axis.text.x = element_blank(), panel.background = element_rect(fill = "white")) +
+  facet_wrap(~subject, scales = "free_y") +
+  labs(y = "Percent of Subject's Electrodes", subtitle = "Best  Predictors",x = "predictors") +
+  scale_fill_manual(values = getPalette(6)) +
+  ggtitle("HFA Unified Encoding")
+
+
+```
+
+
+```{r fdr-correction}
+## prep dfs 
+unified_hfa_data_fdr <- unified_hfa_data_clean %>%
+  select(reg_id, subject, electrode, predictor, epoch, perm_p, fstretch, bstretch) %>%
+  distinct() %>%
+  group_by(epoch, predictor) %>%
+  mutate(perm_p_fdr = p.adjust(perm_p, method = "fdr"))
+
+unified_hfa_fdr_sig <- unified_hfa_data_fdr %>%
+  filter(perm_p_fdr < 0.05) %>%
+  group_by(predictor, epoch) %>%
+  mutate(sig_count = n()) %>%
+  mutate(percent_of_elecs = (sig_count/ 136) * 100)
+
+unified_hfa_fdr_sig_table <- unified_hfa_data_fdr %>%
+  filter(predictor %in% best_preds) %>%
+  filter(perm_p_fdr < 0.05) %>%
+  select(subject, electrode, predictor, epoch, perm_p_fdr) %>%
+  distinct() %>%
+  group_by(predictor, epoch) %>%
+  mutate(sig_count_per_epoch = n()) %>%
+  mutate(percent_of_elecs_per_epoch = (sig_count_per_epoch/ 136) * 100) %>%
+  group_by(predictor) %>%
+  mutate(sig_count = n()) %>%
+  mutate(percent_of_elecs = (sig_count/ 136) * 100) %>%
+  select(predictor, epoch, sig_count_per_epoch, percent_of_elecs_per_epoch, sig_count, percent_of_elecs) %>%
+  distinct() %>%
+  mutate(percent_of_elecs_per_epoch = round(percent_of_elecs_per_epoch, 2)) %>%
+  mutate(percent_of_elecs = round(percent_of_elecs, 2)) %>%
+  arrange(desc(predictor), desc(epoch)) %>%
+  mutate(predictor = if_else(predictor == "trial_type", "Inequity Type",
+                             if_else(predictor == "self_var_payoff", "Self-Offer",
+                                     if_else(predictor == "other_var_payoff", "Other-Offer",
+                                             if_else(predictor == "max", "Max",
+                                                     if_else(predictor == "min", "Min", "Unsigned Inequity"))))))
+  
+
+## plot percent elecs by predictor and subject
+unified_hfa_fdr_sig %>%
+  filter(predictor %in% best_preds) %>%
+  ggplot(., aes(x = predictor, fill = predictor)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), 
+        panel.background = element_rect(fill = "white")) +
+  facet_wrap(~subject) +
+  labs(y = "Number of Electrodes", subtitle = "",x = "predictors") +
+  scale_fill_manual(values = getPalette(6)) +
+  ggtitle("HFA Unified Encoding")
+
+
+## plot percent elecs by predictor (figure 2)
+all_unified_variables_plot <- unified_hfa_fdr_sig %>%
+  filter(predictor %in% best_preds) %>%
+  mutate(predictor = if_else(predictor == "ineq_var_abs", "Abs. Inequity",
+                             if_else(predictor == "max", "Max", 
+                                     if_else(predictor == "min", "Min",
+                                             if_else(predictor == "other_var_payoff", "Other Offer",
+                                                if_else(predictor == "self_var_payoff", "Self Offer", 
+                                                    if_else(predictor == "trial_type", "Trial Type", "NA"))))))) %>%
+  mutate(epoch = factor(epoch, levels = c("presentation", "pre-choice", "post-choice"))) %>%
+  ggplot(., aes(x = predictor, fill = predictor)) +
+  geom_bar(aes(y = after_stat( (count / 136) * 100))) +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+        panel.background = element_rect(fill = "white"),
+        legend.position = "none",
+        strip.text =  element_text(family = "Georgia", color = '#2D2327', size = 16),
+        legend.title = element_text(family = "Georgia", color = '#2D2327', size = 16),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 16),
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 18), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 14), 
+        plot.title = element_text(family = "Georgia", color = '#2D2327', size = 18)) + 
+  facet_wrap(~epoch) +
+  labs(y = "Percentage of OFC Electrodes", x = "") +
+  scale_fill_manual(values = c("#AF2F5F", "#DE4A4D", "#FFD680", "#88D1A3", "#3D99BA", "#876194")) +
+  ggtitle("Social Decision-Making Vars. encoded via HFA")
+
+
+ggsave(filename = path(here(), "figures", "paper", "percent_necoding_unified_results.tif"),
+     device = "tiff",
+     width = 7,
+     height = 6,
+     units = "in",
+     dpi = 320,
+     plot =  all_unified_variables_plot)
+
+
+```
+
+```{r load-raw-hfa-data, echo = F}
+
+# load hfa data #
+all_brain_data_pres <-  read_csv(path(here(), "/munge/all_brain_data_pres_1_3_2022.csv"), 
+                                 col_types = cols())
+all_brain_data_pre_choice <-  read_csv(path(here(), "/munge/all_brain_data_pre_choice_1_3_2022.csv"), 
+                                       col_types = cols())
+all_brain_data_post_choice <-  read_csv(path(here(), "/munge/all_brain_data_post_choice_1_3_2022.csv"),
+                                        col_types = cols())
+
+```
+
+```{r average-beta-weights-other-and-self}
+
+
+unified_hfa_betas_fdr_df <- left_join(unified_hfa_data_clean, unified_hfa_data_fdr)
+
+self_other_choice_counts <- unified_hfa_betas_fdr_df %>%
+  mutate(epoch_ids = paste(subject, electrode, epoch, sep = "_")) %>%
+  filter(predictor %in% c("other_var_payoff", "self_var_payoff") & epoch != "presentation") %>%
+  mutate(sig = perm_p_fdr < 0.05) %>%
+  select(elec_id, predictor, epoch, sig) %>%
+  distinct() %>%
+  add_count(elec_id, name = "sanity_check") %>%
+  add_count(predictor, epoch, name = "num_of_elecs") %>%
+  select(-epoch) %>%
+  distinct() %>%
+  filter(sig == TRUE) %>%
+  add_count(predictor) %>%
+  select(-elec_id, -sig) %>%
+  distinct() %>%
+  mutate(not_sig = num_of_elecs - n)
+
+self_other_df <- unified_hfa_betas_fdr_df %>%
+  mutate(epoch_ids = paste(subject, electrode, epoch, sep = "_")) %>%
+  filter(predictor %in% c("other_var_payoff", "self_var_payoff") & epoch != "presentation") %>%
+  mutate(sig = if_else(perm_p_fdr < 0.05 & predictor == "other_var_payoff", "Other-Offer, n = 29",
+                       if_else(perm_p_fdr < 0.05 & predictor == "self_var_payoff", "Self-Offer, n = 16", "Not Sig., n = 91")))
+
+other_sig_elec_epochs <- self_other_df %>%
+  filter(sig == "Other-Offer, n = 29") %>%
+  pull(epoch_ids) %>%
+  unique()
+
+self_sig_elec_epochs <- self_other_df %>%
+  filter(sig == "Self-Offer, n = 16") %>%
+  pull(epoch_ids) %>%
+  unique()
+
+
+self_other_plot <- self_other_df %>%
+  # make self var encoding exclusive to self, ie don't include other var and vice versa
+  mutate(exclusive_sig = if_else(sig == "Not Sig., n = 91" & predictor == "other_var_payoff" & epoch_ids %in% self_sig_elec_epochs, "SNS",
+                           if_else(sig == "Not Sig., n = 91" & predictor == "self_var_payoff" & epoch_ids %in% other_sig_elec_epochs, "ONS", sig))) %>%
+  mutate(sig= exclusive_sig) %>% # do this to easily turn on/off the difference here, played with different visualizations
+  group_by(bin, sig) %>%
+  mutate(Beta = abs(Beta)) %>%
+  mutate(beta_mean = mean(Beta)) %>% 
+  mutate(beta_upper_error = beta_mean + sd(Beta)/sqrt(n())) %>%
+  mutate(beta_lower_error = beta_mean - sd(Beta)/sqrt(n())) %>%
+  ungroup() %>%
+  mutate(time = if_else(epoch == "pre-choice", -50 * as.numeric(gsub("pre_", "", bin)),
+                        50 * as.numeric(gsub("post_", "", bin)))) %>%
+  select(time, Beta, beta_lower_error, beta_upper_error, beta_mean, sig, predictor) %>%
+  distinct() %>%
+  mutate(facet_lab = if_else(predictor == "self_var_payoff", "Subset of electrodes encoding Self-Offer, not Other-Offer",
+                             "Subset of electrodes encoding Other-Offer, not Self-Offer")) %>%
+  mutate(facet_lab = factor(facet_lab, levels(factor(facet_lab))[c(2, 1)])) %>%
+  mutate(sig = factor(sig, levels(factor(sig))[c(4, 3, 1, 2, 5)])) %>%
+  ggplot(., aes(x = time, y = beta_mean, color = sig, fill = sig)) + 
+  geom_vline(xintercept = 0, color = 'black', linetype = 'dashed') +
+  geom_line() + 
+  geom_ribbon(aes(ymin = beta_lower_error, ymax = beta_upper_error), alpha = .5) +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.position = 'top', 
+        strip.background = element_blank(),
+        strip.text = element_text(family = "Georgia", color = '#2D2327', size = 16),
+        legend.title = element_text(family = "Georgia", color = '#2D2327', size = 16),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 16),
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 18), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 14), 
+        plot.title = element_text(family = "Georgia", color = '#2D2327', size = 18)) +
+  labs(title = "OFC Electrodes encode information about both Self- and Other- Offers via HFA in OFC",
+       y = "Absolute Beta Weight", x = "Time (in ms)", fill = "", color = "") +
+  scale_fill_manual(values = c("#f2c938", "#3ac1d1", "grey", "#9FCCD1", "#E9D798")) +
+  scale_color_manual(values = c("#f2c938", "#3ac1d1", "grey", "#9FCCD1", "#E9D798")) +
+  facet_wrap(~facet_lab)
+
+
+
+ggsave(filename = path(here(), "figures", "paper", "self_other_encoding.tif"),
+     device = "tiff",
+     width =12.7,
+     height = 5,
+     units = "in",
+     dpi = 300,
+     plot =   self_other_plot)
+
+
+
+```
+
+```{r trial-type-betas}
+
+ttype_choice_counts <- unified_hfa_betas_fdr_df %>%
+  mutate(epoch_ids = paste(subject, electrode, epoch, sep = "_")) %>%
+  filter(predictor %in% c("trial_type") & epoch != "presentation") %>%
+  mutate(sig = perm_p_fdr < 0.05) %>%
+  select(elec_id, epoch, sig) %>%
+  distinct()  %>%
+  add_count(elec_id, name = "sanity_check") %>%
+  add_count(epoch, name = "num_of_elecs") %>%
+  select(-epoch) %>%
+  distinct() %>%
+  filter(sig == TRUE) %>%
+  add_count() %>%
+  select(-elec_id, -sig) %>%
+  distinct() %>%
+  mutate(not_sig = num_of_elecs - n)
+
+ttype_beta_df <- unified_hfa_betas_fdr_df %>%
+  mutate(epoch_ids = paste(subject, electrode, epoch, sep = "_")) %>%
+  filter(predictor %in% c("trial_type") & epoch != "presentation") %>%
+  mutate(sig = if_else(perm_p_fdr < 0.05 , "Inequity Type, n = 25", "Not Sig., n = 111"))
+
+ttype_beta_plot <- ttype_beta_df %>%
+  group_by(bin, sig) %>%
+  mutate(Beta = abs(Beta)) %>%
+  mutate(beta_mean = mean(Beta)) %>% 
+  mutate(beta_upper_error = beta_mean + sd(Beta)/sqrt(n())) %>%
+  mutate(beta_lower_error = beta_mean - sd(Beta)/sqrt(n())) %>%
+  ungroup() %>%
+  mutate(time = if_else(epoch == "pre-choice", -50 * as.numeric(gsub("pre_", "", bin)),
+                        50 * as.numeric(gsub("post_", "", bin)))) %>%
+  select(time, Beta, beta_lower_error, beta_upper_error, beta_mean, sig, predictor) %>%
+  distinct() %>%
+  ggplot(., aes(x = time, y = beta_mean, color = sig, fill = sig)) + 
+  geom_vline(xintercept = 0, color = 'black', linetype = 'dashed') +
+  geom_line() + 
+  geom_ribbon(aes(ymin = beta_lower_error, ymax = beta_upper_error), alpha = .5) +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.position = 'top', 
+        strip.background = element_blank(),
+        strip.text = element_text(family = "Georgia", color = 'white', size = 16),
+        legend.title = element_text(family = "Georgia", color = '#2D2327', size = 16),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 16),
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 18), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 14), 
+        plot.title = element_text(family = "Georgia", color = '#2D2327', size = 18)) +
+  labs(title = "OFC Electrodes encode Trial Type via HFA in OFC",
+       y = "Absolute Beta Weight", x = "Time (in ms)", fill = "", color = "") +
+  scale_fill_manual(values = c("#781315", "grey")) +
+  scale_color_manual(values = c("#781315", "grey")) +
+  facet_wrap(~predictor)
+
+
+
+
+ggsave(filename = path(here(), "figures", "paper", "trial_type_encoding_betas.tif"),
+     device = "tiff",
+     width =7.75,
+     height = 5.25,
+     units = "in",
+     dpi = 300,
+     plot =   ttype_beta_plot)
+
+```
+
+
+
+```{r bar-plot}
+preds_alluvial <- c("self_var_payoff", "other_var_payoff", "trial_type")
+
+# there are 51 electrodes that encode self, other, ttype at some point
+bar_vars_count <- unified_hfa_fdr_sig %>%
+  ungroup() %>%
+  filter(predictor %in% preds_alluvial) %>%
+  mutate(predictor = if_else(predictor == "other_var_payoff", "Other Offer",
+                            if_else(predictor == "self_var_payoff", "Self Offer", 
+                                if_else(predictor == "trial_type", "Inequity Type", "NA")))) %>%
+  mutate(elec_id = paste0(subject, "_", electrode)) %>%
+  pull(elec_id) %>%
+  unique()
+
+
+bar_df <- unified_hfa_fdr_sig %>%
+  ungroup() %>%
+  filter(predictor %in% preds_alluvial) %>%
+  mutate(predictor = if_else(predictor == "other_var_payoff", "Other Offer",
+                            if_else(predictor == "self_var_payoff", "Self Offer", 
+                                if_else(predictor == "trial_type", "Inequity Type", "NA")))) %>%
+  mutate(elec_id = paste0(subject, "_", electrode)) %>%
+  select(-reg_id, -perm_p, -fstretch, -bstretch, -perm_p_fdr,
+         -subject, -electrode, -percent_of_elecs, -sig_count) %>%
+  distinct() %>%
+  group_by(elec_id, epoch) %>%
+  mutate(predictor_case = case_when(
+    length(unique(predictor)) == 1 & unique(predictor) == "Self Offer" ~ "Self-Offer",
+    length(unique(predictor)) == 1 & unique(predictor) == "Other Offer" ~ "Other-Offer",
+    length(unique(predictor)) == 1 & unique(predictor) == "Inequity Type" ~ "Inequity Type",
+    length(unique(predictor)) == 3 & unique(predictor) %in% c("Self Offer", "Other Offer", "Inequity Type") ~ "All",
+    length(unique(predictor)) == 2 & 
+      unique(predictor)[1] %in% c("Self Offer", "Other Offer") & 
+      unique(predictor)[2] %in% c("Self Offer", "Other Offer") ~ "Self and Other",
+    length(unique(predictor)) == 2 ~ "Inequity Type +"
+  )) %>%
+  # currently counting every 'all' electrode for each predictor let's fix that
+  select(-predictor) %>%
+  distinct() %>%
+  ungroup() %>%
+  mutate(predictor_case = factor(predictor_case, levels = levels(factor(predictor_case))[c(1, 4, 5, 6, 2, 3)]))
+
+
+
+
+bar_plot <- bar_df %>%
+  ggplot(., aes(fill = predictor_case, x = 1, y = epoch))+
+  geom_col(position = position_fill(reverse = T)) +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.position = 'top', 
+        legend.title = element_text(family = "Georgia", color = '#2D2327', size = 16),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 16),
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 18), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 14), 
+        plot.title = element_text(family = "Georgia", color = '#2D2327', size = 18)) +
+  # scale_fill_manual(values = c("#CA054D", "#F08700", "#EFCA08", "#00A676", "#00A6A6", '#CA054D' )) +
+  # scale_fill_viridis(discrete = T, option = "D", direction = -1, end = 1) +
+  scale_fill_manual(values = turbo(n = 6, begin = .1)) +
+  labs(y = "", 
+       x = "Proportion of Encoding Electrodes (n = 51)", 
+       fill = "Variable", 
+       title = "Overlap in Encoding Variables Over Time")
+
+ggsave(filename = path(here(), "figures", "paper", "bar_proportion_plot.tif"),
+     device = "tiff",
+     width =12.7,
+     height = 5,
+     units = "in",
+     dpi = 300,
+     plot =   bar_plot)
+
+```
+
+

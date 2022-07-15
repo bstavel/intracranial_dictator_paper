@@ -1,0 +1,544 @@
+---
+title: "Noise Comparisons between trial types"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo <- FALSE,  # don't print the code chunk
+  warning <- FALSE,  # don't print warnings
+  message <- FALSE,  # don't print messages
+  fig.width <- 5,  # set default width of figures
+  fig.height <- 8,  # set default height of figures
+  fig.align <- "center",  # always align figure in center
+  fig.pos <- "H",  # always plot figure at the exact location of the code chunk
+  cache <- FALSE)  # cache results
+
+## libraries ##
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+# library(summarytools)
+library(ggthemr)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(wesanderson)
+library(ggsci)
+library(zoo)
+library(kableExtra)
+library(lme4)
+library(RColorBrewer)
+library(doParallel)
+library(parallel)
+library(foreach)
+library(here)
+library(fs)
+library(ggcorrplot)
+library(viridis)
+library(lmtest)
+library(gt)
+library(ggalluvial)
+library(parameters)
+library(factoextra)
+library(NbClust)
+library(ggsankey)
+
+## hand written functions ##
+source(path(here(), "R", "load_behave_data.R"))
+source(path(here(), "R", "prep_behave_data.R"))
+source(path(here(), "R", "stretch_start_end.R"))
+source(path(here(), "R", "load_high_gamma_data.R"))
+source(path(here(), "R", "rolling_window_and_baseline.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+# source('~/Projects/nice_r_functions/ggpaired_pretty.R')
+source(path(here(), "R", 'mutate_cond.R'))
+source(path(here(), "R", "load_and_collate_reg_results.R"))
+
+
+
+## plotting helpers ##
+ggthemr("solarized")
+getPalette = colorRampPalette(brewer.pal(9, "Set1"))
+
+c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+
+# ## parallelization ##
+# nCores <- 4
+# registerDoParallel(nCores)
+# 
+
+
+#find . -type f -mtime +10 -maxdepth 1 -exec mv {} before_3-21-21 \;
+```
+
+## Alternate Hypothesis: Noise Across Different Trial Types
+
+To test if differences in noise between the two trial types was driving our inequity-dependent encoding results, in this analysis we test for significant differences between the residuals in each epoch for both self offer and other offer. If the confidence interval around the difference in means of the residuals did not include 0, we will exclude that electrode-epoch from the inequity-dependent analyses
+
+```{r load-data}
+# load permuted regressor results #
+split_ofc_encoding_reg_df <- read_csv(path(here(), "results", "single_regressions",
+                                       "compiled_ofc_ogpermutation_wpvalues_single_regressions_1_28_2022.csv"))
+
+# load permuted trial results #
+split_ofc_encoding_ttype_df <- read_csv(path(here(), "results", "single_regressions",
+                                       "compiled_ofc_ogpermutation_ttype_wpvalues_single_regressions_1_28_2022.csv"))
+
+# rename test stats and combine #
+split_ofc_encoding_reg_df <- split_ofc_encoding_reg_df %>%
+  rename(test_stat_real_reg = test_stat_real) %>%
+  rename(permuted_p_reg = permuted_p)
+
+split_ofc_encoding_ttype_df <- split_ofc_encoding_ttype_df %>%
+  rename(test_stat_real_ttype = test_stat_real) %>%
+  rename(permuted_p_ttype = permuted_p)
+
+split_ofc_encoding_df <- full_join(split_ofc_encoding_reg_df, split_ofc_encoding_ttype_df)
+
+
+```
+
+```{r prep-dfs}
+
+# percentage of elecs acros epochs
+split_ofc_encoding_reg_sig <- split_ofc_encoding_df %>%
+  filter(permuted_p_reg < 0.05) %>%
+  select(subject, electrode, predictor, epoch, permuted_p_reg) %>%
+  distinct() %>%
+  group_by(predictor, epoch) %>%
+  mutate(sig_count = n()) %>%
+  mutate(percent_of_elecs = (sig_count/ 136) * 100)
+
+split_ofc_encoding_ttype_sig <- split_ofc_encoding_df %>%
+  filter(permuted_p_ttype < 0.05) %>%
+  select(subject, electrode, predictor, epoch, permuted_p_ttype) %>%
+  distinct() %>%
+  group_by(predictor, epoch) %>%
+  mutate(sig_count = n()) %>%
+  mutate(percent_of_elecs = (sig_count/ 136) * 100)
+
+
+split_ofc_encoding_sig <- split_ofc_encoding_df %>%
+  filter(permuted_p_ttype < 0.05 & permuted_p_reg < 0.05) %>%
+  select(subject, electrode, predictor, epoch, permuted_p_ttype, permuted_p_reg) %>%
+  distinct() %>%
+  group_by(predictor, epoch) %>%
+  mutate(sig_count = n()) %>%
+  mutate(percent_of_elecs = (sig_count/ 136) * 100)
+
+
+# fdr correctyed df 
+split_ofc_encoding_df_fdr <- split_ofc_encoding_df %>%
+  select(reg_id, subject, electrode, predictor, epoch, permuted_p_reg, permuted_p_ttype) %>%
+  distinct() %>%
+  group_by(epoch, predictor) %>%
+  mutate(perm_p_reg_fdr = p.adjust(permuted_p_reg, method = "fdr")) %>%
+  mutate(perm_p_ttype_fdr = p.adjust(permuted_p_ttype, method = "fdr"))
+
+
+scatter_plot_r2_df <- split_ofc_encoding_df %>%
+  group_by(reg_id) %>%
+  mutate(mean_adv = mean(Advantageous)) %>%
+  mutate(mean_dis = mean(Disadvantageous)) %>%
+  select(mean_adv, mean_dis, reg_id) %>%
+  distinct() 
+
+scatter_plot_r2_fdr_df <- left_join(scatter_plot_r2_df, split_ofc_encoding_df_fdr)
+
+
+scatter_plot_r2_fdr_df <- scatter_plot_r2_fdr_df %>%
+  mutate(sig = if_else(mean_dis > mean_adv & perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05, "Disadvantageous", 
+                       if_else(mean_adv >= mean_dis & perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05, "Advantegous", "Not Sig.")))
+
+```
+
+
+```{r load-raw-hfa-data, echo = F}
+
+# load hfa data #
+all_brain_data_pres <-  read_csv(path(here(), "/munge/all_brain_data_pres_1_3_2022.csv"), 
+                                 col_types = cols())
+all_brain_data_pre_choice <-  read_csv(path(here(), "/munge/all_brain_data_pre_choice_1_3_2022.csv"), 
+                                       col_types = cols())
+all_brain_data_post_choice <-  read_csv(path(here(), "/munge/all_brain_data_post_choice_1_3_2022.csv"),
+                                        col_types = cols())
+
+# make elec id col
+all_brain_data_pres <- all_brain_data_pres %>%
+  mutate(elec_ids = paste0(subject, "_", electrodes))
+
+all_brain_data_pre_choice <- all_brain_data_pre_choice %>%
+  mutate(elec_ids = paste0(subject, "_", electrodes))
+
+all_brain_data_post_choice <- all_brain_data_post_choice %>%
+  mutate(elec_ids = paste0(subject, "_", electrodes))
+
+```
+
+
+## Presentation
+
+
+```{r presentation-noise-analysis}
+
+presentation_split_encoding_elecs <- split_ofc_encoding_df_fdr %>%
+  mutate(elec_ids = paste0(subject, "_", electrode)) %>%
+  filter(perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05) %>%
+  filter(epoch == "presentation" & predictor %in% c("self_var_payoff", "other_var_payoff"))
+
+
+## Self Var Payoff 
+elec_upper_conf <- NULL
+elec_lower_conf <- NULL
+pres_self_split_encoding_elecs <- presentation_split_encoding_elecs %>% filter(predictor == "self_var_payoff")
+
+# run t test on residuals in both trial types
+for(elec_id in unique(pres_self_split_encoding_elecs$elec_ids)){
+
+    adv_df <- all_brain_data_pres %>% 
+      filter(elec_ids == elec_id) %>%
+      filter(trial_type == "Advantageous")
+    
+    dis_df <- all_brain_data_pres %>% 
+      filter(elec_ids == elec_id) %>%
+      filter(trial_type == "Disadvantageous")
+    
+    nBins <- colnames(all_brain_data_pres %>% select(starts_with("bin_")))[1:15]
+    
+    adv_resid <- NULL
+    dis_resid <- NULL
+    for(bin in nBins) {
+      
+      # run adv models #
+      adv_bin_vec <- adv_df %>% pull(bin)
+      adv_reg_vec <- adv_df %>% pull(other_var_payoff)
+      adv_model <- summary(lm(adv_bin_vec ~ adv_reg_vec))
+      adv_resid[bin] <- abs(median(adv_model$residuals))
+      
+      # run dis models #
+      dis_bin_vec <- dis_df %>% pull(bin)
+      dis_reg_vec <- dis_df %>% pull(other_var_payoff)
+      dis_model <- summary(lm(dis_bin_vec ~ dis_reg_vec))
+      dis_resid[bin] <- abs(median(dis_model$residuals))
+      
+    }
+    
+    t_results <- t.test(dis_resid, adv_resid)
+    elec_upper_conf[elec_id] <- t_results$conf.int[2]
+    elec_lower_conf[elec_id] <- t_results$conf.int[1]
+
+}
+
+elec_noise_pres_self_df <- as_tibble(cbind("elec_ids" = unique(pres_self_split_encoding_elecs$elec_ids), 
+                                       elec_lower_conf, elec_upper_conf))
+elec_noise_pres_self_df$predictor <- "self_var_payoff"
+
+## Other Var Payoff 
+elec_upper_conf <- NULL
+elec_lower_conf <- NULL
+pres_self_split_encoding_elecs <- presentation_split_encoding_elecs %>% filter(predictor == "other_var_payoff")
+
+# run t test on residuals in both trial types
+for(elec_id in unique(pres_self_split_encoding_elecs$elec_ids)){
+
+    adv_df <- all_brain_data_pres %>% 
+      filter(elec_ids == elec_id) %>%
+      filter(trial_type == "Advantageous")
+    
+    dis_df <- all_brain_data_pres %>% 
+      filter(elec_ids == elec_id) %>%
+      filter(trial_type == "Disadvantageous")
+    
+    nBins <- colnames(all_brain_data_pres %>% select(starts_with("bin_")))[1:15]
+    
+    adv_resid <- NULL
+    dis_resid <- NULL
+    for(bin in nBins) {
+      
+      # run adv models #
+      adv_bin_vec <- adv_df %>% pull(bin)
+      adv_reg_vec <- adv_df %>% pull(other_var_payoff)
+      adv_model <- summary(lm(adv_bin_vec ~ adv_reg_vec))
+      adv_resid[bin] <- abs(median(adv_model$residuals))
+      
+      # run dis models #
+      dis_bin_vec <- dis_df %>% pull(bin)
+      dis_reg_vec <- dis_df %>% pull(other_var_payoff)
+      dis_model <- summary(lm(dis_bin_vec ~ dis_reg_vec))
+      dis_resid[bin] <- abs(median(dis_model$residuals))
+      
+    }
+    
+    t_results <- t.test(dis_resid, adv_resid)
+    elec_upper_conf[elec_id] <- t_results$conf.int[2]
+    elec_lower_conf[elec_id] <- t_results$conf.int[1]
+
+}
+
+elec_noise_pres_other_df <- as_tibble(cbind("elec_ids" = unique(pres_self_split_encoding_elecs$elec_ids), 
+                                       elec_lower_conf, elec_upper_conf))
+elec_noise_pres_other_df$predictor <- "other_var_payoff"
+
+# combine dfs #
+elec_noise_pres_df <- rbind(elec_noise_pres_self_df, elec_noise_pres_other_df)
+
+```
+
+## Pre-choice
+
+Two pre-choice electrodes look like they are driven by a difference in noise-- so need to remove them!
+
+`GP51_OFG26` & `GP51_OFG16`
+
+```{r pre-choice-noise-analysis}
+
+pre_choice_split_encoding_elecs <- split_ofc_encoding_df_fdr %>%
+  mutate(elec_ids = paste0(subject, "_", electrode)) %>%
+  filter(perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05) %>%
+  filter(epoch == "pre-choice" & predictor %in% c("self_var_payoff", "other_var_payoff"))
+
+prech_self_split_encoding_elecs <- pre_choice_split_encoding_elecs %>% filter(predictor == "self_var_payoff")
+
+## Self Var Payoff
+elec_upper_conf <- NULL
+elec_lower_conf <- NULL
+for(elec_id in unique(prech_self_split_encoding_elecs$elec_ids)){
+
+    adv_df <- all_brain_data_pre_choice %>% 
+      filter(elec_ids == elec_id) %>%
+      filter(trial_type == "Advantageous")
+    
+    dis_df <- all_brain_data_pre_choice %>% 
+      filter(elec_ids == elec_id) %>%
+      filter(trial_type == "Disadvantageous")
+    
+    nBins <- nBins <- colnames(all_brain_data_pre_choice %>% select(starts_with("pre_")))
+    
+    adv_resid <- NULL
+    dis_resid <- NULL
+    for(bin in nBins) {
+      
+      # run adv models #
+      adv_bin_vec <- adv_df %>% pull(bin)
+      adv_reg_vec <- adv_df %>% pull(other_var_payoff)
+      adv_model <- summary(lm(adv_bin_vec ~ adv_reg_vec))
+      adv_resid[bin] <- abs(median(adv_model$residuals))
+      
+      # run dis models #
+      dis_bin_vec <- dis_df %>% pull(bin)
+      dis_reg_vec <- dis_df %>% pull(other_var_payoff)
+      dis_model <- summary(lm(dis_bin_vec ~ dis_reg_vec))
+      dis_resid[bin] <- abs(median(dis_model$residuals))
+      
+    }
+    
+    t_results <- t.test(dis_resid, adv_resid)
+    elec_upper_conf[elec_id] <- t_results$conf.int[2]
+    elec_lower_conf[elec_id] <- t_results$conf.int[1]
+
+}
+
+elec_noise_prech_self_df <- as_tibble(cbind("elec_ids" = unique(prech_self_split_encoding_elecs$elec_ids), 
+                                       elec_lower_conf, elec_upper_conf))
+elec_noise_prech_self_df$predictor <- "self_var_payoff"
+
+## Other Var Payoff 
+elec_upper_conf <- NULL
+elec_lower_conf <- NULL
+prech_other_split_encoding_elecs <- pre_choice_split_encoding_elecs %>% filter(predictor == "other_var_payoff")
+
+# run t test on residuals in both trial types
+for(elec_id in unique(prech_other_split_encoding_elecs$elec_ids)){
+
+    adv_df <- all_brain_data_pre_choice %>% 
+      filter(elec_ids == elec_id) %>%
+      filter(trial_type == "Advantageous")
+    
+    dis_df <- all_brain_data_pre_choice %>% 
+      filter(elec_ids == elec_id) %>%
+      filter(trial_type == "Disadvantageous")
+    
+    nBins <- nBins <- colnames(all_brain_data_pre_choice %>% select(starts_with("pre_")))
+    
+    adv_resid <- NULL
+    dis_resid <- NULL
+    for(bin in nBins) {
+      
+      # run adv models #
+      adv_bin_vec <- adv_df %>% pull(bin)
+      adv_reg_vec <- adv_df %>% pull(other_var_payoff)
+      adv_model <- summary(lm(adv_bin_vec ~ adv_reg_vec))
+      adv_resid[bin] <- abs(median(adv_model$residuals))
+      
+      # run dis models #
+      dis_bin_vec <- dis_df %>% pull(bin)
+      dis_reg_vec <- dis_df %>% pull(other_var_payoff)
+      dis_model <- summary(lm(dis_bin_vec ~ dis_reg_vec))
+      dis_resid[bin] <- abs(median(dis_model$residuals))
+      
+    }
+    
+    t_results <- t.test(dis_resid, adv_resid)
+    elec_upper_conf[elec_id] <- t_results$conf.int[2]
+    elec_lower_conf[elec_id] <- t_results$conf.int[1]
+
+}
+
+elec_noise_prech_other_df <- as_tibble(cbind("elec_ids" = unique(prech_other_split_encoding_elecs$elec_ids), 
+                                       elec_lower_conf, elec_upper_conf))
+elec_noise_prech_other_df$predictor <- "other_var_payoff"
+
+# combine dfs #
+elec_noise_prech_df <- rbind(elec_noise_prech_self_df, elec_noise_prech_other_df)
+
+
+```
+
+
+## post-choice
+
+`ST40_FG40` & `GP51_OFG41` & `GP51_OFG39` & `GP51_OFG11`
+
+```{r post-choice-noise-analysis}
+
+post_choice_split_encoding_elecs <- split_ofc_encoding_df_fdr %>%
+  mutate(elec_ids = paste0(subject, "_", electrode)) %>%
+  filter(perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05) %>%
+  filter(epoch == "post-choice" & predictor %in% c("self_var_payoff", "other_var_payoff"))
+
+post_self_split_encoding_elecs <- post_choice_split_encoding_elecs %>% filter(predictor == "self_var_payoff")
+
+## Self Var Payoff
+elec_upper_conf <- NULL
+elec_lower_conf <- NULL
+for(elec_id in unique(post_self_split_encoding_elecs$elec_ids)){
+
+    adv_df <- all_brain_data_post_choice %>% 
+      filter(elec_ids == elec_id) %>%
+      filter(trial_type == "Advantageous")
+    
+    dis_df <- all_brain_data_post_choice %>% 
+      filter(elec_ids == elec_id) %>%
+      filter(trial_type == "Disadvantageous")
+    
+    nBins <- nBins <- colnames(all_brain_data_post_choice %>% select(starts_with("post_")))[1:20]
+    
+    adv_resid <- NULL
+    dis_resid <- NULL
+    for(bin in nBins) {
+      
+      # run adv models #
+      adv_bin_vec <- adv_df %>% pull(bin)
+      adv_reg_vec <- adv_df %>% pull(other_var_payoff)
+      adv_model <- summary(lm(adv_bin_vec ~ adv_reg_vec))
+      adv_resid[bin] <- abs(median(adv_model$residuals))
+      
+      # run dis models #
+      dis_bin_vec <- dis_df %>% pull(bin)
+      dis_reg_vec <- dis_df %>% pull(other_var_payoff)
+      dis_model <- summary(lm(dis_bin_vec ~ dis_reg_vec))
+      dis_resid[bin] <- abs(median(dis_model$residuals))
+      
+    }
+    
+    t_results <- t.test(dis_resid, adv_resid)
+    elec_upper_conf[elec_id] <- t_results$conf.int[2]
+    elec_lower_conf[elec_id] <- t_results$conf.int[1]
+
+}
+
+elec_noise_post_self_df <- as_tibble(cbind("elec_ids" = unique(post_self_split_encoding_elecs$elec_ids), 
+                                       elec_lower_conf, elec_upper_conf))
+elec_noise_post_self_df$predictor <- "self_var_payoff"
+
+## Other Var Payoff 
+elec_upper_conf <- NULL
+elec_lower_conf <- NULL
+post_other_split_encoding_elecs <- post_choice_split_encoding_elecs %>% filter(predictor == "other_var_payoff")
+
+# run t test on residuals in both trial types
+for(elec_id in unique(post_other_split_encoding_elecs$elec_ids)){
+
+    adv_df <- all_brain_data_post_choice %>% 
+      filter(elec_ids == elec_id) %>%
+      filter(trial_type == "Advantageous")
+    
+    dis_df <- all_brain_data_post_choice %>% 
+      filter(elec_ids == elec_id) %>%
+      filter(trial_type == "Disadvantageous")
+    
+    nBins <- nBins <- colnames(all_brain_data_post_choice %>% select(starts_with("post_")))[1:20]
+    
+    adv_resid <- NULL
+    dis_resid <- NULL
+    for(bin in nBins) {
+      
+      # run adv models #
+      adv_bin_vec <- adv_df %>% pull(bin)
+      adv_reg_vec <- adv_df %>% pull(other_var_payoff)
+      adv_model <- summary(lm(adv_bin_vec ~ adv_reg_vec))
+      adv_resid[bin] <- abs(median(adv_model$residuals))
+      
+      # run dis models #
+      dis_bin_vec <- dis_df %>% pull(bin)
+      dis_reg_vec <- dis_df %>% pull(other_var_payoff)
+      dis_model <- summary(lm(dis_bin_vec ~ dis_reg_vec))
+      dis_resid[bin] <- abs(median(dis_model$residuals))
+      
+    }
+    
+    t_results <- t.test(dis_resid, adv_resid)
+    elec_upper_conf[elec_id] <- t_results$conf.int[2]
+    elec_lower_conf[elec_id] <- t_results$conf.int[1]
+
+}
+
+elec_noise_post_other_df <- as_tibble(cbind("elec_ids" = unique(post_other_split_encoding_elecs$elec_ids), 
+                                       elec_lower_conf, elec_upper_conf))
+elec_noise_post_other_df$predictor <- "other_var_payoff"
+
+# combine dfs #
+elec_noise_post_df <- rbind(elec_noise_post_self_df, elec_noise_post_other_df)
+
+
+```
+
+
+## combined
+
+```{r combined-epochs}
+
+elec_noise_df <- rbind(elec_noise_pres_df %>% mutate(epoch = "presentation"),
+                       elec_noise_prech_df %>% mutate(epoch = "pre-choice"),
+                       elec_noise_post_df %>% mutate(epoch = "post-choice"))
+
+# sig diff in noise
+elec_noise_df <- elec_noise_df %>%
+  mutate(noise_diff = if_else(0 > elec_lower_conf & 0 < elec_upper_conf, 0, 1)) %>%
+  mutate(elec_epoch_ids = paste(elec_ids, epoch, sep = "_"))
+
+trial_dep_noise_df <- elec_noise_df %>%
+  filter(noise_diff == 1)
+
+# save #
+write_csv(trial_dep_noise_df, path(here(), "results", "trial_dep_differences_noise.csv"))
+
+```
+
+

@@ -1,0 +1,309 @@
+---
+title: "Trial Type Analysis"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo <- FALSE,  # don't print the code chunk
+  warning <- FALSE,  # don't print warnings
+  message <- FALSE,  # don't print messages
+  fig.width <- 5,  # set default width of figures
+  fig.height <- 8,  # set default height of figures
+  fig.align <- "center",  # always align figure in center
+  fig.pos <- "H",  # always plot figure at the exact location of the code chunk
+  cache <- FALSE)  # cache results
+
+## libraries ##
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+# library(summarytools)
+library(ggthemr)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(wesanderson)
+library(ggsci)
+library(zoo)
+library(kableExtra)
+library(lme4)
+library(RColorBrewer)
+library(doParallel)
+library(parallel)
+library(foreach)
+library(here)
+library(fs)
+library(ggcorrplot)
+library(viridis)
+library(lmtest)
+library(gt)
+library(ggalluvial)
+library(parameters)
+library(factoextra)
+library(NbClust)
+
+## hand written functions ##
+source(path(here(), "R", "load_behave_data.R"))
+source(path(here(), "R", "prep_behave_data.R"))
+source(path(here(), "R", "stretch_start_end.R"))
+source(path(here(), "R", "load_high_gamma_data.R"))
+source(path(here(), "R", "rolling_window_and_baseline.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+# source('~/Projects/nice_r_functions/ggpaired_pretty.R')
+source(path(here(), "R", 'mutate_cond.R'))
+source(path(here(), "R", "load_and_collate_reg_results.R"))
+
+
+
+## plotting helpers ##
+ggthemr("light")
+getPalette = colorRampPalette(brewer.pal(9, "Set1"))
+
+c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+
+# ## parallelization ##
+# nCores <- 4
+# registerDoParallel(nCores)
+# 
+
+
+#find . -type f -mtime +10 -maxdepth 1 -exec mv {} before_3-21-21 \;
+```
+
+## Load and prep data
+
+```{r load-unified-data}
+
+unified_ttype_data <- read_csv(path(here(), "results", "single_regressions",
+                                  "compiled_unified_ogpermutation_ofc_results_1_26_2022.csv"))
+```
+
+## HFA
+
+```{r sig-figures-hfa}
+
+## prep dfs ##
+unified_ttype_data_clean<- unified_ttype_data %>%
+  filter(predictor %in% "trial_type") %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  mutate(reg_id = paste(subject, electrode, predictor, epoch, sep = "_"))
+
+unified_ttype_data_sig <- unified_ttype_data_clean %>%
+  filter(perm_p < 0.05) %>%
+  select(subject, electrode, predictor, epoch, elec_id) %>%
+  distinct()
+
+unified_ttype_data_clean %>%
+  select(reg_id, perm_p, epoch) %>%
+  distinct() %>%
+  ggplot(., aes(x = perm_p)) +
+  geom_histogram(binwidth = .01) +
+  geom_vline(xintercept = .05, linetype = "dashed", color = "black") +
+  xlim(0, 1) +
+  theme(panel.background = element_rect(fill = "white")) +
+  facet_wrap(~epoch)
+ 
+table(unique(v_sig_group$elec_id) %in% unique(unified_ttype_data_sig$elec_id))
+
+```
+
+```{r beta-weight}
+
+unified_ttype_data_beta <- unified_ttype_data_clean %>%
+  mutate(time = if_else(epoch == "presentation", 50* as.numeric(gsub("bin_", "", bin)),
+                        if_else(epoch == "pre-choice", -50* as.numeric(gsub("pre_", "", bin)),
+                        if_else(epoch == "post-choice", 50 * as.numeric(gsub("post_", "", bin)), 999))))
+  
+unified_ttype_data_beta %>%
+  filter(perm_p < 0.05) %>%
+  mutate(epoch2 = if_else(epoch == "presentation", "presentation", "choice")) %>%
+  mutate(epoch2 = factor(epoch2, levels = c("presentation", "choice"))) %>%
+  mutate(sig = p < 0.05) %>%
+  ggplot(., aes(x = time, y = Beta, group = elec_id, color = epoch, alpha= sig)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  geom_point() +
+  geom_line() +
+  theme(panel.background = element_rect(fill = "white"), legend.position = "none") +
+  facet_wrap(~epoch2, nrow = 2) +
+  scale_colour_viridis_d(direction = 1, end = .7) +
+  scale_alpha_discrete(range(.8, 1))
+
+
+unified_ttype_data_beta %>%
+  filter(perm_p < 0.05) %>%
+  mutate(epoch2 = if_else(epoch == "presentation", "presentation", "choice")) %>%
+  mutate(epoch2 = factor(epoch2, levels = c("presentation", "choice"))) %>%
+  mutate(sig = p < 0.05) %>%
+  ggplot(., aes(x = time, y = R2, group = elec_id, color = epoch, alpha= sig)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  geom_point() +
+  geom_line() +
+  theme(panel.background = element_rect(fill = "white"), legend.position = "none") +
+  facet_wrap(~epoch2, nrow = 2) +
+  scale_colour_viridis_d(direction = 1, end = .7) +
+  scale_alpha_discrete(range(.8, 1))
+
+
+unified_ttype_data_beta %>%
+  filter(perm_p < 0.05) %>%
+  mutate(epoch2 = if_else(epoch == "presentation", "presentation", "choice")) %>%
+  mutate(epoch2 = factor(epoch2, levels = c("presentation", "choice"))) %>%
+  mutate(sig = if_else(p < 0.05, 1, 0)) %>%
+  ggplot(., aes(x = time, y = sig, fill = epoch)) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+  geom_col() +
+  theme(panel.background = element_rect(fill = "white"), legend.position = "none") +
+  facet_wrap(~epoch2, nrow = 2) +
+  scale_colour_viridis_d(direction = 1, end = .7) 
+
+
+```
+```{r encoding-length}
+
+## prep dfs ##
+unified_ttype_encodel_df <- unified_ttype_data %>%
+  filter(predictor %in% c("other_var_payoff", "self_var_payoff", "max", "min", "trial_type", "ineq_var_abs")) %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  mutate(reg_id = paste(subject, electrode, predictor, epoch, sep = "_"))
+
+unified_ttype_encodel_df <- left_join(unified_ttype_encodel_df, unified_hfa_data_fdr %>% select(reg_id, perm_p_fdr ))
+
+unified_ttype_encodel_df_sig <- unified_ttype_encodel_df %>%
+  filter(perm_p_fdr < 0.05) %>%
+  group_by(reg_id) %>%
+  mutate(sig = if_else(p < 0.05, T, F)) %>%
+  mutate(start_stretch = stretch_start_end(sig)[1]) %>%
+  mutate(end_stretch = stretch_start_end(sig)[2]) %>%
+  mutate(encoding_length =  (end_stretch - start_stretch) + 1) %>%
+  mutate(encoding_time = encoding_length * 50) %>%
+  select(reg_id, elec_id, predictor, epoch, encoding_length, encoding_time) %>%
+  distinct()
+
+
+unified_ttype_encodel_df_sig %>%
+  ggplot(., aes(x = predictor, y = encoding_length, fill = predictor)) +
+  geom_jitter(color = "grey", size = 3) +
+  geom_boxplot(notch = T) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1), panel.background = element_rect(fill = "white")) +
+  scale_fill_manual(values = getPalette(13))
+
+
+ttype_encoding_df <- unified_ttype_encodel_df_sig %>%
+  mutate(pred_ttype = if_else(predictor == "trial_type", "Trial Type", "All Other Predictors"))
+
+
+ttype_encoding_plot <- ttype_encoding_df %>%
+  ggplot(., aes(x = pred_ttype, y = log(encoding_time), fill = pred_ttype)) +
+  geom_jitter(color = "grey", size = 3) +
+  geom_boxplot(notch = T, color = 'black') +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.position = 'top',
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.title = element_text(family = "Georgia", color = '#2D2327', size = 16),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 16),
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 18), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 14), 
+        plot.title = element_text(family = "Georgia", color = '#2D2327', size = 18)) +
+  labs(title = "Trial Type Encoding Duration",
+       y = "Log Transformed Encoding Duration", x= "", fill = "", color = "") +
+  scale_fill_manual(values = c('#575C55', '#876194'))
+
+
+ggsave(filename = path(here(), "figures", "paper", "trial_type_encoding.tif"),
+     device = "tiff",
+     width = 5,
+     height = 6,
+     units = "in",
+     dpi = 300,
+     plot =   ttype_encoding_plot)
+
+
+
+```
+
+```{r anatomy}
+
+
+trial_type_anat <- unified_ttype_data %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  filter(predictor == "trial_type") %>%
+  select(subject, electrode, predictor, epoch, elec_id, perm_p) %>%
+  distinct() %>%
+  mutate(significant = if_else(perm_p < 0.05, 1, 0)) %>%
+  group_by(elec_id) %>%
+  mutate(num_sig = sum(significant)) %>%
+  select(-predictor, -epoch, -perm_p, -significant) %>%
+  distinct() %>%
+  mutate(figure_color = if_else(num_sig == 0, 0, 1)) %>%
+  mutate(figure_elegend =if_else(num_sig == 0, "Not Sig.", "Encodes Trial Type")) %>%
+  rename(bipolar_name = electrode) %>%
+  mutate(electrode = gsub("-.*", "", bipolar_name)) 
+
+### bilateral ###
+write_csv(trial_type_anat, path(here(), "figures", "anat_values", "ofc_electrodes_trial_type.csv"))
+
+for(sub in unique(trial_type_anat$subject)){
+  
+  tmp <- trial_type_anat %>% filter(subject == sub)
+  write.csv(tmp, path(here(), "figures", "anat_values", paste0(sub, "_ofc_electrodes_trial_type.csv")))
+
+
+}
+
+### left ###
+left_ofc_elecs <- trial_type_anat %>% # ST40's OFG grid is on the left
+  filter( (grepl("^AVF", electrode) | grepl("^MVF", electrode) | grepl("^FG", electrode) | grepl("^PVF", electrode) & subject == "ST40") |
+            subject != "ST40" & subject != "GP51") %>%
+  filter(subject %in% c("ST40") | (subject != "IR28" & grepl("^L", electrode)) | (subject == "IR28" & grepl("^R", electrode)))
+
+write_csv(left_ofc_elecs, path(here(), "figures", "anat_values", "ofc_electrodes_trial_type_left.csv"))
+
+for(sub in unique(left_ofc_elecs$subject)){
+  
+  tmp <- left_ofc_elecs %>% filter(subject == sub)
+  write.csv(tmp, path(here(), "figures", "anat_values", paste0(sub, "_ofc_electrodes_trial_type_left.csv")))
+
+
+}
+
+
+### right ###
+right_ofc_elecs <- trial_type_anat %>% # GP51's OFG grid is on the right
+ filter( (grepl("^OFG", electrode) & subject == "GP51") |   subject != "GP51") %>%
+ filter(subject %in% c("GP51") | (subject != "IR28" & grepl("^R", electrode)) | (subject == "IR28" & grepl("^L", electrode)))
+    
+
+write_csv(right_ofc_elecs, path(here(), "figures", "anat_values", "ofc_electrodes_trial_type_right.csv"))
+
+for(sub in unique(right_ofc_elecs$subject)){
+  
+  tmp <- right_ofc_elecs %>% filter(subject == sub)
+  write.csv(tmp, path(here(), "figures", "anat_values", paste0(sub, "_ofc_electrodes_trial_type_right.csv")))
+
+
+}
+
+
+```
+
+
+
+
+
+

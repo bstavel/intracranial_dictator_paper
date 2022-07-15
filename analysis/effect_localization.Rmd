@@ -1,0 +1,424 @@
+---
+title: "Localization Analyses"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo <- FALSE,  # don't print the code chunk
+  warning <- FALSE,  # don't print warnings
+  message <- FALSE,  # don't print messages
+  fig.width <- 5,  # set default width of figures
+  fig.height <- 8,  # set default height of figures
+  fig.align <- "center",  # always align figure in center
+  fig.pos <- "H",  # always plot figure at the exact location of the code chunk
+  cache <- FALSE)  # cache results
+
+## libraries ##
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+# library(summarytools)
+library(ggthemr)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(wesanderson)
+library(ggsci)
+library(zoo)
+library(kableExtra)
+library(lme4)
+library(RColorBrewer)
+library(doParallel)
+library(parallel)
+library(foreach)
+library(here)
+library(fs)
+library(ggcorrplot)
+library(viridis)
+library(lmtest)
+library(gt)
+library(ggalluvial)
+library(parameters)
+library(factoextra)
+library(NbClust)
+library(effectsize)
+library(lme4)
+
+## hand written functions ##
+source(path(here(), "R", "load_behave_data.R"))
+source(path(here(), "R", "prep_behave_data.R"))
+source(path(here(), "R", "stretch_start_end.R"))
+source(path(here(), "R", "load_high_gamma_data.R"))
+source(path(here(), "R", "rolling_window_and_baseline.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+# source('~/Projects/nice_r_functions/ggpaired_pretty.R')
+source(path(here(), "R", 'mutate_cond.R'))
+source(path(here(), "R", "load_and_collate_reg_results.R"))
+
+
+
+## plotting helpers ##
+ggthemr("solarized")
+getPalette = colorRampPalette(brewer.pal(10, "Set2"))
+
+c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+
+# ## parallelization ##
+# nCores <- 4
+# registerDoParallel(nCores)
+# 
+
+
+#find . -type f -mtime +10 -maxdepth 1 -exec mv {} before_3-21-21 \;
+```
+
+
+## Load and Prep Data
+
+```{r load-data}
+
+## split data ##
+# load permuted regressor results #
+split_ofc_encoding_reg_df <- read_csv(path(here(), "results", "single_regressions",
+                                       "compiled_ofc_ogpermutation_wpvalues_single_regressions_1_28_2022.csv"))
+
+# load permuted trial results #
+split_ofc_encoding_ttype_df <- read_csv(path(here(), "results", "single_regressions",
+                                       "compiled_ofc_ogpermutation_ttype_wpvalues_single_regressions_1_28_2022.csv"))
+
+# rename test stats and combine #
+split_ofc_encoding_reg_df <- split_ofc_encoding_reg_df %>%
+  rename(test_stat_real_reg = test_stat_real) %>%
+  rename(permuted_p_reg = permuted_p)
+
+split_ofc_encoding_ttype_df <- split_ofc_encoding_ttype_df %>%
+  rename(test_stat_real_ttype = test_stat_real) %>%
+  rename(permuted_p_ttype = permuted_p)
+
+split_ofc_encoding_df <- full_join(split_ofc_encoding_reg_df, split_ofc_encoding_ttype_df)
+
+
+## unified data ##
+unified_hfa_data <- read_csv(path(here(), "results", "single_regressions",
+                                  "compiled_unified_ogpermutation_ofc_results_1_26_2022.csv"))
+
+
+
+```
+
+```{r alternate-hyp-removal}
+
+## electrodes with differences in noise between trial types ##
+trial_dep_noise_df <- read_csv(path(here(), "results", "trial_dep_differences_noise.csv"))
+
+
+## electrodes better explained by max/min unified encoding ##
+split_v_uni_max_df <- read_csv(path(here(), "results", "unified_max_split_elecs.csv"))
+
+```
+
+```{r prep-dfs}
+
+## remove noisy, possible unified electrodes ##
+split_ofc_encoding_df <- split_ofc_encoding_df %>%
+  mutate(elec_epoch_ids = paste(subject, electrode, epoch, sep = "_")) %>%
+  filter(!elec_epoch_ids %in% trial_dep_noise_df$elec_epoch_ids) %>%
+  filter(!reg_id %in% split_v_uni_max_df$reg_id)
+
+
+## split ##
+split_ofc_encoding_data_clean <- split_ofc_encoding_df %>%
+  # remove duplicate test statistic
+  rename(test_stat_real = test_stat_real_reg) %>%
+  select(reg_id, subject, electrode, predictor, epoch, test_stat_real) %>%
+  distinct() 
+
+# unified #
+unified_hfa_data_clean <- unified_hfa_data %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  mutate(reg_id = paste(subject, electrode, predictor, epoch, sep = "_")) %>%
+  select(reg_id, subject, electrode, predictor, epoch, perm_p, fstretch, bstretch) %>%
+  distinct() 
+
+
+```
+
+
+```{r load-prep-elec-locs}
+
+merge_elec_locations_with_results <- function(df, localizations) {
+## merge df with elec info, stored in localizations
+## creates new var of form ROI1-ROI2  
+## also cleans elec names
+  
+  # only the localization columns we need #
+  localizations <- localizations %>% select(Electrode, subject, `Loc Meeting`, Coordinates)
+  
+  # clean the names
+  df <- df %>%
+    mutate(electrode = gsub("POL ", "", electrode)) %>%
+    mutate(electrode = gsub(" POL", "", electrode)) %>%
+    mutate(electrode = gsub("-Ref", "", electrode)) %>%
+    mutate(electrode = gsub("-Ref-", "-", electrode)) 
+  
+  # separate two electrodes
+  df <- df %>%
+    mutate(first_elec= gsub("-.*", "", electrode)) %>%
+    mutate(second_elec = gsub(".*-", "", electrode))
+  # join on first electrode
+  df <- left_join(df,
+                 localizations,
+                 by = c("subject" = "subject", "first_elec" = "Electrode"))
+  # rename to `first_region`
+  df <- df %>%
+    rename(first_region = `Loc Meeting`, first_coordinates = Coordinates)
+  # join on second electrode and rename
+  df <-  left_join(df,
+             localizations,
+             by = c("subject" = "subject", "second_elec" = "Electrode")) %>%
+    rename(second_region = `Loc Meeting`, second_coordinates = Coordinates)
+  # paste into useful format
+  df <- df %>% mutate(ROI = paste0(first_region, "-", second_region))
+  
+  return(df)
+
+}
+
+# read in data #
+localization_df <- read_csv(path(here(), "munge", "combined_electrode_info_with_bob.csv"))
+coords_st40 <- read_csv(path(here(), "electrode_coverage", "ST40_elec_locs.csv"))
+localization_df <- localization_df %>% filter(subject != "ST40")
+localization_df_st40 <- localization_df %>% filter(subject == "ST40")
+localization_df_st40 <- full_join(coords_st40, localization_df_st40 %>% select(-Coordinates))
+localization_df <- rbind(localization_df, localization_df_st40)
+
+
+# unified #
+unified_hfa_data_clean <- merge_elec_locations_with_results(unified_hfa_data_clean, localization_df)
+unified_hfa_data_clean <- unified_hfa_data_clean %>%
+  mutate(elec_id = paste(subject, "_", electrode)) %>%
+  separate(first_coordinates, into = c("first_x", "first_y", "first_z"), sep = "    ") %>%
+  separate(second_coordinates, into = c("second_x", "second_y", "second_z"), sep = "    ") %>%
+  mutate_at(.vars = vars("first_x", "first_y", "first_z", "second_x", "second_y", "second_z"), .funs = function(x) as.numeric(x)) %>%
+  rowwise() %>%
+  mutate(average_x = mean(first_x, second_x)) %>%
+  mutate(average_y = mean(first_y, second_y)) %>%
+  mutate(average_z = mean(first_z, second_z)) %>%
+  ungroup()
+
+# split #
+split_ofc_encoding_data_clean <- merge_elec_locations_with_results(split_ofc_encoding_data_clean, localization_df)
+split_ofc_encoding_data_clean <- split_ofc_encoding_data_clean %>%
+  mutate(elec_id = paste(subject, "_", electrode)) %>%
+  separate(first_coordinates, into = c("first_x", "first_y", "first_z"), sep = "    ") %>%
+  separate(second_coordinates, into = c("second_x", "second_y", "second_z"), sep = "    ") %>%
+  mutate_at(.vars = vars("first_x", "first_y", "first_z", "second_x", "second_y", "second_z"), .funs = function(x) as.numeric(x)) %>%
+  rowwise() %>%
+  mutate(average_x = mean(first_x, second_x)) %>%
+  mutate(average_y = mean(first_y, second_y)) %>%
+  mutate(average_z = mean(first_z, second_z)) %>%
+  ungroup()
+
+```
+
+
+## Unified Localization Results
+
+
+```{r unified-localization-overall}
+
+# overall #
+
+overall_electrode_unified_model_x <- lme4::lmer(fstretch ~ average_x +  (1|subject), data = unified_hfa_data_clean)
+overall_electrode_unified_model_y <- lme4::lmer(fstretch ~ average_y +  (1|subject), data = unified_hfa_data_clean)
+overall_electrode_unified_model_z <- lme4::lmer(fstretch ~ average_z +  (1|subject), data = unified_hfa_data_clean)
+summary(overall_electrode_unified_model_x)
+summary(overall_electrode_unified_model_y)
+summary(overall_electrode_unified_model_z)
+
+```
+
+```{r unified-localization-ttype}
+
+# overall #
+ttype_electrode_unified_model_x <- lme4::lmer(fstretch ~ average_x +  (1|subject), data = unified_hfa_data_clean%>% filter(predictor == 'trial_type'))
+ttype_electrode_unified_model_y <- lme4::lmer(fstretch ~ average_y +  (1|subject), data = unified_hfa_data_clean %>% filter(predictor == 'trial_type'))
+ttype_electrode_unified_model_z <- lme4::lmer(fstretch ~ average_z +  (1|subject), data = unified_hfa_data_clean %>% filter(predictor == 'trial_type'))
+summary(ttype_electrode_unified_model_x)
+summary(ttype_electrode_unified_model_y)
+summary(ttype_electrode_unified_model_z)
+effectsize(ttype_electrode_unified_model_z)
+
+```
+
+```{r unified-localization-otherv}
+
+# overall #
+otherv_electrode_unified_model_x <- lme4::lmer(fstretch ~ average_x +  (1|subject), data = unified_hfa_data_clean%>% filter(predictor == 'other_var_payoff'))
+otherv_electrode_unified_model_y <- lme4::lmer(fstretch ~ average_y +  (1|subject), data = unified_hfa_data_clean %>% filter(predictor == 'other_var_payoff'))
+otherv_electrode_unified_model_z <- lme4::lmer(fstretch ~ average_z +  (1|subject), data = unified_hfa_data_clean %>% filter(predictor == 'other_var_payoff'))
+summary(otherv_electrode_unified_model_x)
+summary(otherv_electrode_unified_model_y)
+summary(otherv_electrode_unified_model_z)
+
+```
+
+```{r unified-localization-selfv}
+
+# overall #
+selfv_electrode_unified_model_x <- lme4::lmer(fstretch ~ average_x +  (1|subject), data = unified_hfa_data_clean%>% filter(predictor == 'self_var_payoff'))
+selfv_electrode_unified_model_y <- lme4::lmer(fstretch ~ average_y +  (1|subject), data = unified_hfa_data_clean %>% filter(predictor == 'self_var_payoff'))
+selfv_electrode_unified_model_z <- lme4::lmer(fstretch ~ average_z +  (1|subject), data = unified_hfa_data_clean %>% filter(predictor == 'self_var_payoff'))
+summary(selfv_electrode_unified_model_x)
+summary(selfv_electrode_unified_model_y)
+summary(selfv_electrode_unified_model_z)
+
+```
+
+## State Dependent Localization Results
+
+```{r split-localization-overall}
+
+# overall #
+
+overall_electrode_split_model_x <- lme4::lmer(test_stat_real ~ average_x +  (1|subject), data = split_ofc_encoding_data_clean)
+overall_electrode_split_model_y <- rlmer(test_stat_real ~ average_y +  (1|subject), data = split_ofc_encoding_data_clean)
+overall_electrode_split_model_z <- lme4::lmer(test_stat_real ~ average_z +  (1|subject), data = split_ofc_encoding_data_clean)
+summary(overall_electrode_split_model_x)
+summary(overall_electrode_split_model_y)
+summary(overall_electrode_split_model_z)
+
+# further exploration
+effectsize(overall_electrode_split_model_y)
+
+
+# need pvals for reporting #
+n <- 1603
+t <- 2.161
+p_val_y <- 2*pt(-abs(t),df=n-1)
+
+# visual
+
+split_ofc_encoding_data_clean %>%
+  ggplot(., aes(x = average_y, y = log(test_stat_real), color = subject)) +
+  geom_point() +
+  # geom_smooth(method = "lm") +
+  theme(panel.background = element_rect(fill = "white")) +
+  scale_color_viridis(discrete = T)
+
+
+split_ofc_encoding_data_clean %>%
+  ggplot(., aes(x = log(test_stat_real))) +
+  geom_histogram() +
+  theme(panel.background = element_rect(fill = "white")) +
+  scale_color_viridis(discrete = T)
+
+# residuals 
+qqnorm(residuals(overall_electrode_split_model_y))
+
+```
+
+
+```{r split-localization-otherv}
+
+# overall #
+otherv_electrode_split_model_x <- lme4::lmer(test_stat_real ~ average_x +  (1|subject), 
+                                             data = split_ofc_encoding_data_clean%>% filter(predictor == 'other_var_payoff'))
+otherv_electrode_split_model_y <- lme4::lmer(test_stat_real ~ average_y +  (1|subject), 
+                                             data = split_ofc_encoding_data_clean %>% filter(predictor == 'other_var_payoff'))
+otherv_electrode_split_model_z <- lme4::lmer(test_stat_real ~ average_z +  (1|subject), 
+                                             data = split_ofc_encoding_data_clean %>% filter(predictor == 'other_var_payoff'))
+summary(otherv_electrode_split_model_x)
+summary(otherv_electrode_split_model_y)
+summary(otherv_electrode_split_model_z)
+
+
+```
+
+```{r split-localization-selfv}
+
+# overall #
+selfv_electrode_split_model_x <- lme4::lmer(test_stat_real ~ average_x +  (1|subject), data = split_ofc_encoding_data_clean%>% filter(predictor == 'self_var_payoff'))
+selfv_electrode_split_model_y <- lme4::lmer(test_stat_real ~ average_y +  (1|subject), data = split_ofc_encoding_data_clean %>% filter(predictor == 'self_var_payoff'))
+selfv_electrode_split_model_z <- lme4::lmer(test_stat_real ~ average_z +  (1|subject), data = split_ofc_encoding_data_clean %>% filter(predictor == 'self_var_payoff'))
+summary(selfv_electrode_split_model_x)
+summary(selfv_electrode_split_model_y)
+summary(selfv_electrode_split_model_z)
+
+
+# further exploration
+effectsize(selfv_electrode_split_model_y)
+effectsize(selfv_electrode_split_model_z)
+
+# need pvals for reporting #
+n <- 408
+t <- 1.92
+p_val_y <- 2*pt(-abs(t),df=n-1)
+
+n <- 408
+t <- -1.48
+p_val_z <- 2*pt(-abs(t),df=n-1)
+```
+
+
+```{r split-localization-max}
+
+# overall #
+max_electrode_split_model_x <- lme4::lmer(test_stat_real ~ average_x +  (1|subject), 
+                                          data = split_ofc_encoding_data_clean%>% filter(predictor == 'max'))
+max_electrode_split_model_y <- lme4::lmer(test_stat_real ~ average_y +  (1|subject),
+                                            data = split_ofc_encoding_data_clean %>% filter(predictor == 'max'))
+max_electrode_split_model_z <- lme4::lmer(test_stat_real ~ average_z +  (1|subject), 
+                                            data = split_ofc_encoding_data_clean %>% filter(predictor == 'max'))
+summary(max_electrode_split_model_x)
+summary(max_electrode_split_model_y)
+summary(max_electrode_split_model_z)
+
+
+# further exploration
+effectsize(max_electrode_split_model_y)
+effectsize(max_electrode_split_model_z)
+
+```
+
+
+```{r split-localization-min}
+
+# overall #
+min_electrode_split_model_x <- lme4::lmer(test_stat_real ~ average_x +  (1|subject), 
+                                          data = split_ofc_encoding_data_clean%>% filter(predictor == 'min'))
+min_electrode_split_model_y <- lme4::lmer(test_stat_real ~ average_y +  (1|subject),
+                                            data = split_ofc_encoding_data_clean %>% filter(predictor == 'min'))
+min_electrode_split_model_z <- lme4::lmer(test_stat_real ~ average_z +  (1|subject), 
+                                            data = split_ofc_encoding_data_clean %>% filter(predictor == 'min'))
+summary(min_electrode_split_model_x)
+summary(min_electrode_split_model_y)
+summary(min_electrode_split_model_z)
+
+
+# further exploration
+effectsize(min_electrode_split_model_x)
+effectsize(min_electrode_split_model_y)
+
+```
+
+
+
+
+

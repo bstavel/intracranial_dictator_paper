@@ -1,0 +1,315 @@
+---
+title: "Unified Anatomy Plot Prep"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo <- FALSE,  # don't print the code chunk
+  warning <- FALSE,  # don't print warnings
+  message <- FALSE,  # don't print messages
+  fig.width <- 5,  # set default width of figures
+  fig.height <- 8,  # set default height of figures
+  fig.align <- "center",  # always align figure in center
+  fig.pos <- "H",  # always plot figure at the exact location of the code chunk
+  cache <- FALSE)  # cache results
+
+## libraries ##
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+# library(summarytools)
+library(ggthemr)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(wesanderson)
+library(ggsci)
+library(zoo)
+library(kableExtra)
+library(lme4)
+library(RColorBrewer)
+library(doParallel)
+library(parallel)
+library(foreach)
+library(here)
+library(fs)
+library(ggcorrplot)
+library(viridis)
+library(lmtest)
+library(gt)
+library(ggalluvial)
+library(parameters)
+library(factoextra)
+library(NbClust)
+
+## hand written functions ##
+source(path(here(), "R", "load_behave_data.R"))
+source(path(here(), "R", "prep_behave_data.R"))
+source(path(here(), "R", "stretch_start_end.R"))
+source(path(here(), "R", "load_high_gamma_data.R"))
+source(path(here(), "R", "rolling_window_and_baseline.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+# source('~/Projects/nice_r_functions/ggpaired_pretty.R')
+source(path(here(), "R", 'mutate_cond.R'))
+source(path(here(), "R", "load_and_collate_reg_results.R"))
+
+
+
+## plotting helpers ##
+ggthemr("light")
+getPalette = colorRampPalette(brewer.pal(9, "Set1"))
+
+c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+
+# ## parallelization ##
+# nCores <- 4
+# registerDoParallel(nCores)
+# 
+
+
+#find . -type f -mtime +10 -maxdepth 1 -exec mv {} before_3-21-21 \;
+```
+
+## Load and prep data
+
+```{r load-unified-data}
+
+unified_anat_data <- read_csv(path(here(), "results", "single_regressions",
+                                  "compiled_unified_ogpermutation_ofc_results_1_26_2022.csv"))
+```
+```{r prep-dfs}
+
+## prep dfs ##
+unified_hfa_anat_clean<- unified_anat_data %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  mutate(reg_id = paste(subject, electrode, predictor, epoch, sep = "_"))
+
+
+unified_hfa_anat_fdr <- unified_hfa_anat_clean %>%
+  select(reg_id, subject, electrode, predictor, epoch, perm_p, fstretch, bstretch) %>%
+  distinct() %>%
+  group_by(epoch, predictor) %>%
+  mutate(perm_p_fdr = p.adjust(perm_p, method = "fdr"))
+
+```
+
+
+
+### prep for figure 2.d
+
+```{r trial_type}
+
+
+trial_type_anat <- unified_hfa_anat_fdr %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  filter(predictor == "trial_type") %>%
+  select(subject, electrode, predictor, epoch, elec_id, perm_p_fdr) %>%
+  distinct() %>%
+  mutate(significant = if_else(perm_p_fdr < 0.05, 1, 0)) %>%
+  group_by(elec_id) %>%
+  mutate(num_sig = sum(significant)) %>%
+  select(-predictor, -epoch, -perm_p_fdr, -significant) %>%
+  distinct() %>%
+  mutate(figure_color = if_else(num_sig == 0, 0, 1)) %>%
+  mutate(figure_elegend =if_else(num_sig == 0, "Not Sig.", "Encodes Trial Type")) %>%
+  rename(bipolar_name = electrode) %>%
+  mutate(electrode = gsub("-.*", "", bipolar_name)) 
+
+### bilateral ###
+write_csv(trial_type_anat, path(here(), "figures", "anat_values", "ofc_electrodes_trial_type.csv"))
+
+for(sub in unique(trial_type_anat$subject)){
+  
+  tmp <- trial_type_anat %>% filter(subject == sub)
+  write.csv(tmp, path(here(), "figures", "anat_values", paste0(sub, "_ofc_electrodes_trial_type.csv")))
+
+
+}
+
+### left ###
+left_ofc_elecs <- trial_type_anat %>% # ST40's OFG grid is on the left
+  filter( (grepl("^AVF", electrode) | grepl("^MVF", electrode) | grepl("^FG", electrode) | grepl("^PVF", electrode) & subject == "ST40") |
+            subject != "ST40" & subject != "GP51") %>%
+  filter(subject %in% c("ST40") | (subject != "IR28" & grepl("^L", electrode)) | (subject == "IR28" & grepl("^R", electrode)))
+
+write_csv(left_ofc_elecs, path(here(), "figures", "anat_values", "ofc_electrodes_trial_type_left.csv"))
+
+for(sub in unique(left_ofc_elecs$subject)){
+  
+  tmp <- left_ofc_elecs %>% filter(subject == sub)
+  write.csv(tmp, path(here(), "figures", "anat_values", paste0(sub, "_ofc_electrodes_trial_type_left.csv")))
+
+
+}
+
+
+### right ###
+right_ofc_elecs <- trial_type_anat %>% # GP51's OFG grid is on the right
+ filter( (grepl("^OFG", electrode) & subject == "GP51") |   subject != "GP51") %>%
+ filter(subject %in% c("GP51") | (subject != "IR28" & grepl("^R", electrode)) | (subject == "IR28" & grepl("^L", electrode)))
+    
+
+write_csv(right_ofc_elecs, path(here(), "figures", "anat_values", "ofc_electrodes_trial_type_right.csv"))
+
+for(sub in unique(right_ofc_elecs$subject)){
+  
+  tmp <- right_ofc_elecs %>% filter(subject == sub)
+  write.csv(tmp, path(here(), "figures", "anat_values", paste0(sub, "_ofc_electrodes_trial_type_right.csv")))
+
+
+}
+
+
+```
+
+
+### Supplemental
+
+
+```{r self_var}
+
+
+self_var_payoff_anat <- unified_hfa_anat_fdr %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  filter(predictor == "self_var_payoff") %>%
+  select(subject, electrode, predictor, epoch, elec_id, perm_p_fdr) %>%
+  distinct() %>%
+  mutate(significant = if_else(perm_p_fdr < 0.05, 1, 0)) %>%
+  group_by(elec_id) %>%
+  mutate(num_sig = sum(significant)) %>%
+  select(-predictor, -epoch, -perm_p_fdr, -significant) %>%
+  distinct() %>%
+  mutate(figure_color = if_else(num_sig == 0, 0, 1)) %>%
+  mutate(figure_elegend =if_else(num_sig == 0, "Not Sig.", "Encodes Self-Offer")) %>%
+  rename(bipolar_name = electrode) %>%
+  mutate(electrode = gsub("-.*", "", bipolar_name)) 
+
+### bilateral ###
+write_csv(self_var_payoff_anat, path(here(), "figures", "anat_values", "ofc_electrodes_self_var_payoff.csv"))
+
+for(sub in unique(self_var_payoff_anat$subject)){
+  
+  tmp <- self_var_payoff_anat %>% filter(subject == sub)
+  write.csv(tmp, path(here(), "figures", "anat_values", paste0(sub, "_ofc_electrodes_self_var_payoff.csv")))
+
+
+}
+
+### left ###
+left_ofc_elecs <- self_var_payoff_anat %>% # ST40's OFG grid is on the left
+  filter( (grepl("^AVF", electrode) | grepl("^MVF", electrode) | grepl("^FG", electrode) | grepl("^PVF", electrode) & subject == "ST40") |
+            subject != "ST40" & subject != "GP51") %>%
+  filter(subject %in% c("ST40") | (subject != "IR28" & grepl("^L", electrode)) | (subject == "IR28" & grepl("^R", electrode)))
+
+write_csv(left_ofc_elecs, path(here(), "figures", "anat_values", "ofc_electrodes_self_var_payoff_left.csv"))
+
+for(sub in unique(left_ofc_elecs$subject)){
+  
+  tmp <- left_ofc_elecs %>% filter(subject == sub)
+  write.csv(tmp, path(here(), "figures", "anat_values", paste0(sub, "_ofc_electrodes_self_var_payoff_left.csv")))
+
+
+}
+
+
+### right ###
+right_ofc_elecs <- self_var_payoff_anat %>% # GP51's OFG grid is on the right
+ filter( (grepl("^OFG", electrode) & subject == "GP51") |   subject != "GP51") %>%
+ filter(subject %in% c("GP51") | (subject != "IR28" & grepl("^R", electrode)) | (subject == "IR28" & grepl("^L", electrode)))
+    
+
+write_csv(right_ofc_elecs, path(here(), "figures", "anat_values", "ofc_electrodes_self_var_payoff_right.csv"))
+
+for(sub in unique(right_ofc_elecs$subject)){
+  
+  tmp <- right_ofc_elecs %>% filter(subject == sub)
+  write.csv(tmp, path(here(), "figures", "anat_values", paste0(sub, "_ofc_electrodes_self_var_payoff_right.csv")))
+
+
+}
+
+
+```
+
+```{r other_var}
+
+
+other_var_payoff_anat <- unified_hfa_anat_fdr %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  filter(predictor == "other_var_payoff") %>%
+  select(subject, electrode, predictor, epoch, elec_id, perm_p_fdr) %>%
+  distinct() %>%
+  mutate(significant = if_else(perm_p_fdr < 0.05, 1, 0)) %>%
+  group_by(elec_id) %>%
+  mutate(num_sig = sum(significant)) %>%
+  select(-predictor, -epoch, -perm_p_fdr, -significant) %>%
+  distinct() %>%
+  mutate(figure_color = if_else(num_sig == 0, 0, 1)) %>%
+  mutate(figure_elegend =if_else(num_sig == 0, "Not Sig.", "Encodes Other-Offer")) %>%
+  rename(bipolar_name = electrode) %>%
+  mutate(electrode = gsub("-.*", "", bipolar_name)) %>%
+  arrange(figure_elegend)
+
+### bilateral ###
+write_csv(other_var_payoff_anat, path(here(), "figures", "anat_values", "ofc_electrodes_other_var_payoff.csv"))
+
+for(sub in unique(other_var_payoff_anat$subject)){
+  
+  tmp <- other_var_payoff_anat %>% filter(subject == sub)
+  write.csv(tmp, path(here(), "figures", "anat_values", paste0(sub, "_ofc_electrodes_other_var_payoff.csv")))
+
+
+}
+
+### left ###
+left_ofc_elecs <- other_var_payoff_anat %>% # ST40's OFG grid is on the left
+  filter( (grepl("^AVF", electrode) | grepl("^MVF", electrode) | grepl("^FG", electrode) | grepl("^PVF", electrode) & subject == "ST40") |
+            subject != "ST40" & subject != "GP51") %>%
+  filter(subject %in% c("ST40") | (subject != "IR28" & grepl("^L", electrode)) | (subject == "IR28" & grepl("^R", electrode)))
+
+write_csv(left_ofc_elecs, path(here(), "figures", "anat_values", "ofc_electrodes_other_var_payoff_left.csv"))
+
+for(sub in unique(left_ofc_elecs$subject)){
+  
+  tmp <- left_ofc_elecs %>% filter(subject == sub)
+  write.csv(tmp, path(here(), "figures", "anat_values", paste0(sub, "_ofc_electrodes_other_var_payoff_left.csv")))
+
+
+}
+
+
+### right ###
+right_ofc_elecs <- other_var_payoff_anat %>% # GP51's OFG grid is on the right
+ filter( (grepl("^OFG", electrode) & subject == "GP51") |   subject != "GP51") %>%
+ filter(subject %in% c("GP51") | (subject != "IR28" & grepl("^R", electrode)) | (subject == "IR28" & grepl("^L", electrode)))
+    
+
+write_csv(right_ofc_elecs, path(here(), "figures", "anat_values", "ofc_electrodes_other_var_payoff_right.csv"))
+
+for(sub in unique(right_ofc_elecs$subject)){
+  
+  tmp <- right_ofc_elecs %>% filter(subject == sub)
+  write.csv(tmp, path(here(), "figures", "anat_values", paste0(sub, "_ofc_electrodes_other_var_payoff_right.csv")))
+
+
+}
+
+
+```
+
