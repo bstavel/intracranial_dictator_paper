@@ -80,10 +80,11 @@ registerDoParallel(nCores)
 ```
 
 
-number of people
-number of electrodes
-number of ofc electrodes
-percentage of ofc electrodes w/ trial type encoding
+# Compile all split (inequity dependent) encoding results 
+
+This Rmd file collects all the individual outputs of the electrode-by-electrode permutations and collates them into single csv. We do this for the HFA (our main analyses, Supplmental Table 2), the residual control analysis (Supplemental Table 3) as well as for the Theta band (Supplemental Table 4).
+
+The adv and dis files are then combined and compared against the null distributions and pvalues are created in `null_distribution.Rmd`
 
 ```{r munge-data-hfa, echo = F, eval = T}
 
@@ -139,6 +140,60 @@ compile_single_reg_data(tag = "locked-dis-only-cperm-hilbertRS",
 
 ```
 
+```{r munge-data-hfa-resids, echo = F, eval = T}
+
+
+# read in raw localizations data #
+merge_all_subs_with_elec_info <- function(df, localizations) {
+## merge df with elec info, stored in localizations
+## creates new var of form ROI1-ROI2  
+## also cleans elec names
+  
+  # only the localization columns we need #
+  localizations <- localizations %>% select(Electrode, subject, `Loc Meeting`)
+  
+  # clean the names
+  df <- df %>%
+    mutate(electrode = gsub("POL ", "", electrode)) %>%
+    mutate(electrode = gsub(" POL", "", electrode)) %>%
+    mutate(electrode = gsub("-Ref", "", electrode)) %>%
+    mutate(electrode = gsub("-Ref-", "-", electrode)) 
+  
+  # separate two electrodes
+  df <- df %>%
+    mutate(first_elec= gsub("-.*", "", electrode)) %>%
+    mutate(second_elec = gsub(".*-", "", electrode))
+  # join on first electrode
+  df <- left_join(df,
+                 localizations,
+                 by = c("subject" = "subject", "first_elec" = "Electrode"))
+  # rename to `first_region`
+  df <- df %>%
+    rename(first_region = `Loc Meeting`)
+  # join on second electrode and rename
+  df <-  left_join(df,
+             localizations,
+             by = c("subject" = "subject", "second_elec" = "Electrode")) %>%
+    rename(second_region = `Loc Meeting`) 
+  # paste into useful format
+  df <- df %>% mutate(ROI = paste0(first_region, "-", second_region))
+  
+  return(df)
+
+}
+
+compile_single_reg_data(tag = "locked-adv-only-cperm-resid-hilbertRS",
+                        post_sub_path = "final", freq = "*",
+                        ofc_file_name = "adv_only_ofc_residual_ogpermutation_single_regressions_1_28_2022.csv",
+                        cing_file_name =  "adv_only_cing_residual_ogpermutation_single_regressions_1_28_2022.csv")
+
+compile_single_reg_data(tag = "locked-dis-only-cperm-resid-hilbertRS",
+                        post_sub_path = "final", freq = "*",
+                        ofc_file_name = "dis_only_ofc_residual_ogpermutation_single_regressions_1_28_2022.csv",
+                        cing_file_name =  "dis_only_cing_residual_ogpermutation_single_regressions_1_28_2022.csv")
+
+```
+
 
 ```{r munge-data-theta, echo = F, eval = T}
 
@@ -182,68 +237,15 @@ merge_all_subs_with_elec_info <- function(df, localizations) {
 
 }
 
-compile_single_reg_data(tag = "locked-adv-only-hilbertRS",
-                        freq = "theta", post_sub_path = "post_eda/theta",
-                        ofc_file_name = "adv_only_ofc_theta_single_regressions_1_4_2022.csv",
-                        cing_file_name =  "adv_only_cing_theta_single_regressions_1_4_2022.csv")
+compile_single_reg_data(tag = "locked-adv-only-cperm-hilbertRS",
+                        freq = "theta", post_sub_path = "final",
+                        ofc_file_name = "adv_only_ofc_theta_ogpermutation_single_regressions_10_10_2022.csv",
+                        cing_file_name =  "adv_only_cing_theta_ogpermutation_single_regressions_10_10_2022.csv")
 
-compile_single_reg_data(tag = "locked-dis-only-hilbertRS",
-                        freq = "theta", post_sub_path = "post_eda/theta",
-                        ofc_file_name = "dis_only_ofc_theta_single_regressions_1_4_2022.csv",
-                        cing_file_name =  "dis_only_cing_theta_single_regressions_1_4_2022.csv")
-
-```
-```{r munge-data-delta, echo = F, eval = T}
-
-
-# read in raw localizations data #
-merge_all_subs_with_elec_info <- function(df, localizations) {
-## merge df with elec info, stored in localizations
-## creates new var of form ROI1-ROI2  
-## also cleans elec names
-  
-  # only the localization columns we need #
-  localizations <- localizations %>% select(Electrode, subject, `Loc Meeting`)
-  
-  # clean the names
-  df <- df %>%
-    mutate(electrode = gsub("POL ", "", electrode)) %>%
-    mutate(electrode = gsub(" POL", "", electrode)) %>%
-    mutate(electrode = gsub("-Ref", "", electrode)) %>%
-    mutate(electrode = gsub("-Ref-", "-", electrode)) 
-  
-  # separate two electrodes
-  df <- df %>%
-    mutate(first_elec= gsub("-.*", "", electrode)) %>%
-    mutate(second_elec = gsub(".*-", "", electrode))
-  # join on first electrode
-  df <- left_join(df,
-                 localizations,
-                 by = c("subject" = "subject", "first_elec" = "Electrode"))
-  # rename to `first_region`
-  df <- df %>%
-    rename(first_region = `Loc Meeting`)
-  # join on second electrode and rename
-  df <-  left_join(df,
-             localizations,
-             by = c("subject" = "subject", "second_elec" = "Electrode")) %>%
-    rename(second_region = `Loc Meeting`) 
-  # paste into useful format
-  df <- df %>% mutate(ROI = paste0(first_region, "-", second_region))
-  
-  return(df)
-
-}
-
-compile_single_reg_data(tag = "locked-adv-only-hilbertRS",
-                        freq = "delta", post_sub_path = "post_eda/delta",
-                        ofc_file_name = "adv_only_ofc_delta_single_regressions_1_4_2022.csv",
-                        cing_file_name =  "adv_only_cing_delta_single_regressions_1_4_2022.csv")
-
-compile_single_reg_data(tag = "locked-dis-only-hilbertRS",
-                        freq = "delta", post_sub_path = "post_eda/delta",
-                        ofc_file_name = "dis_only_ofc_delta_single_regressions_1_4_2022.csv",
-                        cing_file_name =  "dis_only_cing_delta_single_regressions_1_4_2022.csv")
+compile_single_reg_data(tag = "locked-dis-only-cperm-hilbertRS",
+                        freq = "theta", post_sub_path = "final",
+                        ofc_file_name = "dis_only_ofc_theta_ogpermutation_single_regressions_10_10_2022.csv",
+                        cing_file_name =  "dis_only_cing_theta_ogpermutation_single_regressions_10_10_2022.csv")
 
 ```
 

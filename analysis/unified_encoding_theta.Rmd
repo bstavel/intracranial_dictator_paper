@@ -1,0 +1,164 @@
+---
+title: "Unified Encoding ~ Theta"
+output: html_document
+date: '2022-10-04'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo <- FALSE,  # don't print the code chunk
+  warning <- FALSE,  # don't print warnings
+  message <- FALSE,  # don't print messages
+  fig.width <- 5,  # set default width of figures
+  fig.height <- 8,  # set default height of figures
+  fig.align <- "center",  # always align figure in center
+  fig.pos <- "H",  # always plot figure at the exact location of the code chunk
+  cache <- FALSE)  # cache results
+
+## libraries ##
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+# library(summarytools)
+library(ggthemr)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(wesanderson)
+library(ggsci)
+library(zoo)
+library(kableExtra)
+library(lme4)
+library(RColorBrewer)
+library(doParallel)
+library(parallel)
+library(foreach)
+library(here)
+library(fs)
+library(ggcorrplot)
+library(viridis)
+library(lmtest)
+library(gt)
+library(ggalluvial)
+library(factoextra)
+library(NbClust)
+
+## hand written functions ##
+source(path(here(), "R", "load_behave_data.R"))
+source(path(here(), "R", "prep_behave_data.R"))
+source(path(here(), "R", "stretch_start_end.R"))
+source(path(here(), "R", "load_high_gamma_data.R"))
+source(path(here(), "R", "rolling_window_and_baseline.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+# source('~/Projects/nice_r_functions/ggpaired_pretty.R')
+source(path(here(), "R", 'mutate_cond.R'))
+source(path(here(), "R", "load_and_collate_reg_results.R"))
+
+
+
+## plotting helpers ##
+ggthemr("solarized")
+getPalette = colorRampPalette(brewer.pal(9, "Set1"))
+
+c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+
+# ## parallelization ##
+# nCores <- 4
+# registerDoParallel(nCores)
+# 
+
+
+#find . -type f -mtime +10 -maxdepth 1 -exec mv {} before_3-21-21 \;
+```
+
+
+# Unified Analyses (Theta)
+
+This notebook takes the compiled results from the permutated regressions, does FDR correction, creates the supplementary tables within the theta band for the unified results. Creates Supplemental Table 4. 
+
+
+
+## Load and prep data
+
+```{r load-unified-data}
+
+unified_theta_data <- read_csv(path(here(), "results", "single_regressions",
+                                  "compiled_unified_ogpermutation_ofc_theta_results_10_4_2022.csv"))
+
+
+```
+
+## theta
+
+```{r sig-figures-theta}
+
+## preds to use ##
+best_preds <- c("other_var_payoff", "self_var_payoff", "trial_type")
+
+
+## prep dfs ##
+unified_theta_data_clean<- unified_theta_data %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  mutate(reg_id = paste(subject, electrode, predictor, epoch, sep = "_")) 
+  #filter(!reg_id %in% both_sig_elecs) # does not include elecs that were also sig for split, does not change pattern of results
+
+## FDR
+unified_theta_data_fdr <- unified_theta_data_clean %>%
+  select(reg_id, subject, electrode, predictor, epoch, perm_p, fstretch, bstretch) %>%
+  distinct() %>%
+  group_by(epoch, predictor) %>%
+  mutate(perm_p_fdr = p.adjust(perm_p, method = "fdr"))
+
+```
+
+
+```{r create-tables}
+
+# Create supplemental table 4 #
+
+unified_theta_fdr_sig_table <- unified_theta_data_fdr %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  filter(predictor %in% best_preds) %>%
+  filter(perm_p_fdr < 0.05) %>%
+  select(subject, elec_id, predictor, epoch, perm_p_fdr) %>%
+  distinct() %>%
+  group_by(predictor, epoch) %>%
+  mutate(sig_count_per_epoch =  length(unique(elec_id))) %>%
+  mutate(percent_of_elecs_per_epoch = (sig_count_per_epoch/ 136) * 100) %>%
+  mutate(unique_subs_by_epoch = length(unique(subject))) %>%
+  group_by(predictor) %>%
+  mutate(sig_count = length(unique(elec_id))) %>%
+  mutate(percent_of_elecs = (sig_count/ 136) * 100) %>%
+  mutate(unique_subs = length(unique(subject))) %>%
+  select(predictor, epoch, sig_count_per_epoch, unique_subs_by_epoch, percent_of_elecs_per_epoch, sig_count, unique_subs, percent_of_elecs) %>%
+  distinct() %>%
+  mutate(percent_of_elecs_per_epoch = round(percent_of_elecs_per_epoch, 2)) %>%
+  mutate(percent_of_elecs = round(percent_of_elecs, 2)) %>%
+  arrange(desc(predictor), desc(epoch)) %>%
+  mutate(predictor = if_else(predictor == "trial_type", "Inequity Type",
+                             if_else(predictor == "self_var_payoff", "Self-Offer",
+                                     if_else(predictor == "other_var_payoff", "Other-Offer",
+                                             if_else(predictor == "max", "Max",
+                                                     if_else(predictor == "min", "Min", "Unsigned Inequity"))))))
+  
+unified_theta_fdr_sig_table %>%
+  kable %>%
+  kable_styling()  %>%
+  add_header_above(c("FDR-Corrected Theta Unified Encoding Results" = 8))
+```
+

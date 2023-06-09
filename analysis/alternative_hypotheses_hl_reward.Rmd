@@ -1,0 +1,733 @@
+---
+title: "High/Low Reward vs State-dependent"
+output: html_document
+date: '2022-09-22'
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo <- FALSE,  # don't print the code chunk
+  warning <- FALSE,  # don't print warnings
+  message <- FALSE,  # don't print messages
+  fig.width <- 5,  # set default width of figures
+  fig.height <- 8,  # set default height of figures
+  fig.align <- "center",  # always align figure in center
+  fig.pos <- "H",  # always plot figure at the exact location of the code chunk
+  cache <- FALSE)  # cache results
+
+## libraries ##
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+# library(summarytools)
+library(ggthemr)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(wesanderson)
+library(ggsci)
+library(zoo)
+library(kableExtra)
+library(lme4)
+library(RColorBrewer)
+library(doParallel)
+library(parallel)
+library(foreach)
+library(here)
+library(fs)
+library(ggcorrplot)
+library(viridis)
+library(lmtest)
+library(gt)
+library(ggalluvial)
+library(factoextra)
+library(NbClust)
+
+## hand written functions ##
+source(path(here(), "R", "load_behave_data.R"))
+source(path(here(), "R", "prep_behave_data.R"))
+source(path(here(), "R", "stretch_start_end.R"))
+source(path(here(), "R", "load_high_gamma_data.R"))
+source(path(here(), "R", "rolling_window_and_baseline.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+# source('~/Projects/nice_r_functions/ggpaired_pretty.R')
+source(path(here(), "R", 'mutate_cond.R'))
+source(path(here(), "R", "load_and_collate_reg_results.R"))
+
+
+
+## plotting helpers ##
+ggthemr("solarized")
+getPalette = colorRampPalette(brewer.pal(9, "Set1"))
+
+c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+
+# ## parallelization ##
+# nCores <- 4
+# registerDoParallel(nCores)
+# 
+
+
+#find . -type f -mtime +10 -maxdepth 1 -exec mv {} before_3-21-21 \;
+```
+
+
+## High/Low Reward vs State-dependent
+
+```
+ Besides, I suspect there is a major flaw in the design. This cannot be directly inferred from the methods description, because there is no explicit information there about how the offers were varied. Yet, unless this was specifically controlled, it is likely that the inequity level was at least partially confounded with the reward levels. This is because, when the self reward is high, the inequity is probably advantageous. If this is indeed the case, then it is impossible to establish specific links between neural activity and reward versus inequity. It also means that the reward range was different for advantageous and disadvantageous inequity, which precludes the comparison of reward 'encoding' between these two 'contexts'.
+```
+
+We took this comment to suggest that our `trial_type` analyses might be better explained by a high vs low reward trial split. Since `trial_type` is indeed correlated with `self_offer`. These analyses follow a similar structure as the chosen vs unchosen alternate explanation analyses, where we create a new variable, `high_low_reward` and see if it better explains the `HFA` activity in electrodes that we showed significantly encoded `trial_type`
+
+### Load and prep data
+
+```{r load-unified-data}
+
+unified_hfa_data <- read_csv(path(here(), "results", "single_regressions",
+                                  "compiled_unified_ogpermutation_ofc_results_1_26_2022.csv"))
+```
+
+
+
+```{r sig-figures-hfa}
+
+## prep dfs ##
+unified_hfa_data_clean<- unified_hfa_data %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  mutate(reg_id = paste(subject, electrode, predictor, epoch, sep = "_")) 
+ 
+unified_hfa_data_fdr <- unified_hfa_data_clean %>%
+  select(reg_id, subject, electrode, predictor, epoch, perm_p, fstretch, bstretch) %>%
+  distinct() %>%
+  group_by(epoch, predictor) %>%
+  mutate(perm_p_fdr = p.adjust(perm_p, method = "fdr"))
+
+
+trial_type_sig_df <- unified_hfa_data_fdr %>%
+  filter(predictor == "trial_type") %>%
+  filter(perm_p_fdr < .05)
+
+trial_type_sig_df_pres <- trial_type_sig_df %>% filter(epoch == "presentation")
+trial_type_sig_df_pre <- trial_type_sig_df %>% filter(epoch == "pre-choice")
+trial_type_sig_df_post <- trial_type_sig_df %>% filter(epoch == "post-choice")
+
+```
+
+```{r load-raw-hfa-data, echo = F}
+
+# load hfa data #
+all_brain_data_pres <-  read_csv(path(here(), "/munge/all_brain_data_pres_1_3_2022.csv"), 
+                                 col_types = cols())
+all_brain_data_pre_choice <-  read_csv(path(here(), "/munge/all_brain_data_pre_choice_1_3_2022.csv"), 
+                                       col_types = cols())
+all_brain_data_post_choice <-  read_csv(path(here(), "/munge/all_brain_data_post_choice_1_3_2022.csv"),
+                                        col_types = cols())
+
+```
+
+
+### Create `high_low_reward` variable
+
+I looked at both using the mean of `self_offer` and the median, and I checked it in both new and old subjects, as some of the earlier subjects only had 200 trials. 
+
+```{r create-high-low-var}
+
+tmp <- all_brain_data_pres %>%
+  filter(subject == "GP51") %>%
+  select(!starts_with("bin")) %>%
+  select(-electrodes, -X.1) %>%
+  distinct() %>%
+  filter(trial_type != "equality")
+
+tmp %>%
+  ggplot(., aes(x = self_var_payoff, fill = trial_type, color = trial_type)) +
+  geom_histogram(binwidth = 1, alpha = .7) +
+  geom_vline(xintercept = mean(tmp$self_var_payoff), color = "black",  size = 1) +
+  geom_vline(xintercept = median(tmp$self_var_payoff), color = "black", linetype = 2, size = 1) +
+  theme(panel.background = element_rect(fill = "white")) +
+  ggtitle("trial type vs self offer: early subjects")
+
+
+tmp2 <- all_brain_data_pres %>%
+  filter(subject == "IR39") %>%
+  select(!starts_with("bin")) %>%
+  select(-electrodes, -X.1) %>%
+  distinct() %>%
+  filter(trial_type != "equality")
+
+ttype_self_payof_plot <-  tmp2 %>%
+  ggplot(., aes(x = self_var_payoff, fill = trial_type, color = trial_type)) +
+  geom_histogram(binwidth = 1, alpha = .7) +
+  geom_vline(xintercept = mean(tmp2$self_var_payoff), color = "black",  size = 1) +
+  geom_vline(xintercept = median(tmp2$self_var_payoff), color = "black", linetype = 2, size = 1) +
+  labs(y = "Count", x = "Self Offer", fill = "Trial Type", color = "Trial Type") +
+  theme(panel.background = element_blank(), legend.position = "top",
+      strip.text = element_blank(),
+      legend.title = element_text(family = "Georgia", color = '#2D2327', size = 18),
+      legend.text = element_text(family = "Georgia", color = '#2D2327', size = 18),
+      axis.title = element_text(family = "Georgia", color = '#2D2327', size = 18), 
+      axis.text = element_text(family = "Georgia", color = '#2D2327', size = 16), 
+      plot.subtitle = element_text(family = "Georgia", color = '#2D2327', size = 20),
+      plot.title = element_text(family = "Georgia", color = '#2D2327', size = 22)) +
+  ggtitle("Self Offer by Trial Type", subtitle = "Solid Line: Mean, Dashed Line: Median")
+
+ggsave(filename = path(here(), "figures", "paper", "response_to_reviwers_alt_highlowreward.png"),
+     device = "png",
+     width = 12,
+     height = 8,
+     units = "in",
+     dpi = 300,
+     plot =   plot(ttype_self_payof_plot))
+```
+While there is a small shift in mean between early and late subjects (14.22 vs 14.29), they are close enough that any cutoff we could pick would pick the same sets of trials for each subjects. The mean (solid balck line) separates the trial types better than the median does, so I will use the mean to create the cut off. This should give the dummy variable `high_low_reward` the best chance of explaining the `trial_type` effects.
+
+
+```{r prep-raw-hfa-data, echo = F}
+
+# load hfa data #
+all_brain_data_pres <-  all_brain_data_pres %>% 
+  mutate(high_low_reward = if_else(self_var_payoff > 14.2, "high", "low"))
+all_brain_data_pre_choice <-  all_brain_data_pre_choice %>% 
+  mutate(high_low_reward = if_else(self_var_payoff > 14.2, "high", "low"))
+all_brain_data_post_choice <- all_brain_data_post_choice %>% 
+  mutate(high_low_reward = if_else(self_var_payoff > 14.2, "high", "low"))
+
+```
+
+## Regressions across both trial type for High/Low Split
+
+As we did in the chosen/unchosen analyses, I take all the electrodes-epoch pairs that encoded `trial_type` and see if `high_low_reward` can better explain their behavior. Based on the regressions below, 21/50 elecs could in theory be explained by the `high_low_reward` variable, but the others cannot. While it is possible that sum electrodes are encoding high_low reward it seems at least 29 electrodes are better explained by `trial_type` encoding.
+
+In the second revision, we added multivariate regression to look at whether `trial_type` was encoded while controlling for `self_offer` and `self_payoff`
+
+```{r high-low-reward}
+
+
+### presentation
+nBins <- colnames(all_brain_data_pres %>% select(starts_with("bin_")))[1:15]
+
+for(sub in unique(trial_type_sig_df_pres$subject)){
+  
+  sub_df_tmp <- trial_type_sig_df_pres %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_pres %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                reg_vec <- brain_behave_data_elec %>% pull(high_low_reward)
+                model <- summary(lm(bin_vec ~ reg_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: presentation; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+  }
+}
+
+
+
+### PRE CHOICE
+nBins <- colnames(all_brain_data_pre_choice %>% select(starts_with("pre_")))
+
+for(sub in unique(trial_type_sig_df_pre$subject)){
+  
+  sub_df_tmp <- trial_type_sig_df_pre %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_pre_choice %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                reg_vec <- brain_behave_data_elec %>% pull(high_low_reward)
+                model <- summary(lm(bin_vec ~ reg_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: Pre-Choice; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+  }
+}
+
+### POST CHOICE
+nBins <- colnames(all_brain_data_post_choice %>% select(starts_with("post_")))[1:20]
+
+for(sub in unique(trial_type_sig_df_post$subject)){
+  
+  sub_df_tmp <- trial_type_sig_df_post %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_post_choice %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                reg_vec <- brain_behave_data_elec %>% pull(high_low_reward)
+                model <- summary(lm(bin_vec ~ reg_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: Post-Choice; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+  }
+}
+
+```
+
+```{r ttype-self-offer}
+
+ttype_svar_counter <- 0
+
+### presentation
+nBins <- colnames(all_brain_data_pres %>% select(starts_with("bin_")))[1:15]
+
+for(sub in unique(trial_type_sig_df_pres$subject)){
+  
+  sub_df_tmp <- trial_type_sig_df_pres %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_pres %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                ttype_vec <- brain_behave_data_elec %>% pull(trial_type)
+                selfv_vec <- brain_behave_data_elec %>% pull(self_var_payoff)
+                model <- summary(lm(bin_vec ~ ttype_vec + selfv_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: presentation; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+      ttype_svar_counter <- ttype_svar_counter + sum(as.numeric(lm_pval < .05))
+  }
+}
+
+
+### PRE CHOICE
+nBins <- colnames(all_brain_data_pre_choice %>% select(starts_with("pre_")))
+
+for(sub in unique(trial_type_sig_df_pre$subject)){
+  
+  sub_df_tmp <- trial_type_sig_df_pre %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_pre_choice %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                ttype_vec <- brain_behave_data_elec %>% pull(trial_type)
+                selfv_vec <- brain_behave_data_elec %>% pull(self_var_payoff)
+                model <- summary(lm(bin_vec ~ ttype_vec + selfv_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: Pre-Choice; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+      ttype_svar_counter <- ttype_svar_counter + sum(as.numeric(lm_pval < .05))
+  }
+}
+
+### POST CHOICE
+nBins <- colnames(all_brain_data_post_choice %>% select(starts_with("post_")))[1:20]
+
+for(sub in unique(trial_type_sig_df_post$subject)){
+  
+  sub_df_tmp <- trial_type_sig_df_post %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_post_choice %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                ttype_vec <- brain_behave_data_elec %>% pull(trial_type)
+                selfv_vec <- brain_behave_data_elec %>% pull(self_var_payoff)
+                model <- summary(lm(bin_vec ~ ttype_vec + selfv_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: Post-Choice; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+      ttype_svar_counter <- ttype_svar_counter + sum(as.numeric(lm_pval < .05))
+  }
+}
+
+
+```
+
+```{r ttype-self-payof}
+
+ttype_soffer_counter <- 0
+
+### presentation
+nBins <- colnames(all_brain_data_pres %>% select(starts_with("bin_")))[1:15]
+
+for(sub in unique(trial_type_sig_df_pres$subject)){
+  
+  sub_df_tmp <- trial_type_sig_df_pres %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_pres %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                ttype_vec <- brain_behave_data_elec %>% pull(trial_type)
+                selfv_vec <- brain_behave_data_elec %>% pull(self_payoff)
+                model <- summary(lm(bin_vec ~ ttype_vec + selfv_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: presentation; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+      ttype_soffer_counter <- ttype_soffer_counter + sum(as.numeric(lm_pval < .05))
+  }
+}
+
+
+### PRE CHOICE
+nBins <- colnames(all_brain_data_pre_choice %>% select(starts_with("pre_")))
+
+for(sub in unique(trial_type_sig_df_pre$subject)){
+  
+  sub_df_tmp <- trial_type_sig_df_pre %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_pre_choice %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                ttype_vec <- brain_behave_data_elec %>% pull(trial_type)
+                selfv_vec <- brain_behave_data_elec %>% pull(self_payoff)
+                model <- summary(lm(bin_vec ~ ttype_vec + selfv_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: Pre-Choice; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+      ttype_soffer_counter <- ttype_soffer_counter + sum(as.numeric(lm_pval < .05))
+  }
+}
+
+### POST CHOICE
+nBins <- colnames(all_brain_data_post_choice %>% select(starts_with("post_")))[1:20]
+
+for(sub in unique(trial_type_sig_df_post$subject)){
+  
+  sub_df_tmp <- trial_type_sig_df_post %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_post_choice %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                ttype_vec <- brain_behave_data_elec %>% pull(trial_type)
+                selfv_vec <- brain_behave_data_elec %>% pull(self_payoff)
+                model <- summary(lm(bin_vec ~ ttype_vec + selfv_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: Post-Choice; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+      ttype_soffer_counter <- ttype_soffer_counter + sum(as.numeric(lm_pval < .05))
+  }
+}
+
+
+```
+
+```{r counters}
+
+ttype_svar_counter/ttype_counter
+
+ttype_soffer_counter/ttype_counter
+
+
+```
+
+
+## Trial Type Regressions as a sanity check
+
+```{r trial-type}
+
+
+ttype_counter <- 0
+
+### presentation
+nBins <- colnames(all_brain_data_pres %>% select(starts_with("bin_")))[1:15]
+
+for(sub in unique(trial_type_sig_df_pres$subject)){
+  
+  sub_df_tmp <- trial_type_sig_df_pres %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_pres %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                reg_vec <- brain_behave_data_elec %>% pull(trial_type)
+                model <- summary(lm(bin_vec ~ reg_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: presentation; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+      ttype_counter <- ttype_counter + sum(as.numeric(lm_pval < .05))
+  }
+}
+
+
+
+### PRE CHOICE
+nBins <- colnames(all_brain_data_pre_choice %>% select(starts_with("pre_")))
+
+for(sub in unique(trial_type_sig_df_pre$subject)){
+  
+  sub_df_tmp <- trial_type_sig_df_pre %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_pre_choice %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                reg_vec <- brain_behave_data_elec %>% pull(trial_type)
+                model <- summary(lm(bin_vec ~ reg_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: Pre-Choice; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+      ttype_counter <- ttype_counter + sum(as.numeric(lm_pval < .05))
+  }
+}
+
+### POST CHOICE
+nBins <- colnames(all_brain_data_post_choice %>% select(starts_with("post_")))[1:20]
+
+for(sub in unique(trial_type_sig_df_post$subject)){
+  
+  sub_df_tmp <- trial_type_sig_df_post %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_post_choice %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                reg_vec <- brain_behave_data_elec %>% pull(trial_type)
+                model <- summary(lm(bin_vec ~ reg_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: Post-Choice; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+      ttype_counter <- ttype_counter + sum(as.numeric(lm_pval < .05))
+  }
+}
+
+```
+
+

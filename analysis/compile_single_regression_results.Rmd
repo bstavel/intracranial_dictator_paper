@@ -79,7 +79,9 @@ c25 <- c(
 #find . -type f -mtime +10 -maxdepth 1 -exec mv {} before_3-21-21 \;
 ```
 
-# compile all unified encoding results by frequency band
+# Compile all unified encoding results 
+
+This Rmd file collects all the individual outputs of the electrode-by-electrode permutations and collates them into single csv. We do this for the HFA (our main analyses, Supplmental Table 2), various control analyses (Residuals and multivariate, see Supplemental Table 3), as well as for the Theta band (Supplemental Table 4)
 
 ## HFA
 
@@ -449,6 +451,1513 @@ post_choice_results_st40 <- compile_results(regions = regions_to_combine,
 
 ```
 
+```{r merge-single-files-hfa, echo = F, eval = T}
+
+
+# merge together
+results_IR57 <- rbind(presentation_results_57 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_57 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_57 %>% mutate(epoch = "post-choice"))
+
+results_IR35 <- rbind(presentation_results_35 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_35 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_35 %>% mutate(epoch = "post-choice"))
+
+results_IR28 <- rbind(presentation_results_28 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_28 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_28 %>% mutate(epoch = "post-choice"))
+
+results_IR26 <- rbind(presentation_results_26 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_26 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_26 %>% mutate(epoch = "post-choice"))
+
+results_IR16 <- rbind(presentation_results_16 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_16 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_16 %>% mutate(epoch = "post-choice"))
+
+# results_IR10 <- rbind(presentation_results_10 %>% mutate(epoch = "presentation"),
+#                       pre_choice_results_10 %>% mutate(epoch = "pre-choice"),
+#                       post_choice_results_10 %>% mutate(epoch = "post-choice"))
+
+results_IR9 <- rbind(presentation_results_9 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_9 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_9 %>% mutate(epoch = "post-choice"))
+
+# results_IR19 <- rbind(presentation_results_19 %>% mutate(epoch = "presentation"),
+#                       pre_choice_results_19 %>% mutate(epoch = "pre-choice"),
+#                       post_choice_results_19 %>% mutate(epoch = "post-choice"))
+
+results_IR39 <- rbind(presentation_results_39 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_39 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_39 %>% mutate(epoch = "post-choice"))
+
+results_GP51 <- rbind(presentation_results_gp51 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_gp51 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_gp51 %>% mutate(epoch = "post-choice"))
+
+results_DA9 <- rbind(presentation_results_da9 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_da9 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_da9 %>% mutate(epoch = "post-choice"))
+
+results_ST40 <- rbind(presentation_results_st40 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_st40 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_st40 %>% mutate(epoch = "post-choice"))
+
+# results_CP34 <- rbind(presentation_results_cp34 %>% mutate(epoch = "presentation"),
+#                       pre_choice_results_cp34 %>% mutate(epoch = "pre-choice"),
+#                       post_choice_results_cp34 %>% mutate(epoch = "post-choice"))
+
+# results_DA8 <- rbind(presentation_results_da8 %>% mutate(epoch = "presentation"),
+#                       pre_choice_results_da8 %>% mutate(epoch = "pre-choice"))
+
+merged_results <- rbind(results_IR57 %>% mutate(subject = "IR57"),
+                            results_IR39 %>% mutate(subject = "IR39"),
+                            results_IR35 %>% mutate(subject = "IR35"),
+                            results_IR28 %>% mutate(subject = "IR28"),
+                            results_IR26 %>% mutate(subject = "IR26"),
+                            # results_IR19 %>% mutate(subject = "IR19"),
+                            results_IR16 %>% mutate(subject = "IR16"),
+                            results_IR9 %>% mutate(subject = "IR9"),
+                            results_DA9 %>% mutate(subject = "DA9"),
+                            results_GP51 %>% mutate(subject = "GP51"),
+                            results_ST40 %>% mutate(subject = "ST40"))
+
+
+
+merged_results <- merged_results %>%
+          mutate(electrode = gsub("POL ", "", electrode)) %>%
+          mutate(electrode = gsub(" POL", "", electrode)) %>%
+          mutate(electrode = gsub("-Ref", "", electrode)) %>%
+          mutate(electrode = gsub("-Ref-", "-", electrode)) 
+
+
+# read in raw localizations data #
+# should be ofc, but some other regions might have snuck in #
+merge_all_subs_with_elec_info <- function(df, localizations, coords = FALSE) {
+## merge df with elec info, stored in localizations
+## creates new var of form ROI1-ROI2  
+## also cleans elec names
+  
+  # only the localization columns we need #
+  if(coords == TRUE){
+    localizations <- localizations %>% select(Electrode, subject, Coordinates, `Loc Meeting`)
+  } else {
+    localizations <- localizations %>% select(Electrode, subject, `Loc Meeting`)
+  }
+  
+  # clean the names
+  df <- df %>%
+    mutate(electrode = gsub("POL ", "", electrode)) %>%
+    mutate(electrode = gsub(" POL", "", electrode)) %>%
+    mutate(electrode = gsub("-Ref", "", electrode)) %>%
+    mutate(electrode = gsub("-Ref-", "-", electrode)) 
+  
+  # separate two electrodes
+  df <- df %>%
+    mutate(first_elec= gsub("-.*", "", electrode)) %>%
+    mutate(second_elec = gsub(".*-", "", electrode))
+  # join on first electrode
+  df <- left_join(df,
+                 localizations,
+                 by = c("subject" = "subject", "first_elec" = "Electrode"))
+  # rename to `first_region`
+  df <- df %>%
+    rename(first_region = `Loc Meeting`)
+  # join on second electrode and rename
+  df <-  left_join(df,
+             localizations,
+             by = c("subject" = "subject", "second_elec" = "Electrode")) %>%
+    rename(second_region = `Loc Meeting`) 
+  # paste into useful format
+  df <- df %>% mutate(ROI = paste0(first_region, "-", second_region))
+  
+  return(df)
+
+}
+
+bad_predictors <- c("self_var_payoff_adv", "self_var_payoff_dis", "other_var_payoff_adv", "other_var_payoff_dis", "more_or_none")
+
+localizations <- read_csv(path(here(), "munge", "combined_electrode_info_with_bob.csv"))
+
+## for anatomical analyses ##
+localized_results_anatomy <- merge_all_subs_with_elec_info(merged_results, localizations, coords = T)
+ofc_merged_results_anat <- localized_results_anatomy %>%
+  filter(grepl("ofc", ROI, ignore.case = T) | grepl("orbit", ROI, ignore.case = T)) %>% 
+  mutate(predictor = gsub('[[:digit:]]+', "", predictor)) %>%
+  mutate(predictor = gsub("OFG_", "", predictor)) %>%
+  mutate(predictor = gsub("^FG_", "", predictor)) %>%
+  filter(!predictor %in% bad_predictors)
+
+write_csv(ofc_merged_results_anat,
+          path(here(), "results", "single_regressions", "compiled_unified_ogpermutation_ofc_results_1_26_2022_anatomy.csv"))
+
+## for main analyses ##
+localized_results_pres <- merge_all_subs_with_elec_info(merged_results, localizations)
+ofc_merged_results <- localized_results_pres %>%
+  filter(grepl("ofc", ROI, ignore.case = T) | grepl("orbit", ROI, ignore.case = T)) %>% 
+  mutate(predictor = gsub('[[:digit:]]+', "", predictor)) %>%
+  mutate(predictor = gsub("OFG_", "", predictor)) %>%
+  mutate(predictor = gsub("^FG_", "", predictor)) %>%
+  filter(!predictor %in% bad_predictors)
+cing_merged_results <- localized_results_pres %>%
+   filter(grepl("cing", ROI, ignore.case = T) | grepl("CC", ROI, ignore.case = T)) %>% 
+   filter(!grepl("occipital", ROI, ignore.case = T)) %>%
+  filter(!predictor %in% bad_predictors)
+
+# write_csv(ofc_merged_results, 
+#           path(here(), "results", "single_regressions", "compiled_unified_ogpermutation_ofc_results_1_26_2022.csv"))
+# write_csv(cing_merged_results, 
+#           path(here(), "results", "single_regressions", "compiled_unified_ogpermutation_cingulate_results_1_26_2022.csv"))
+
+
+```
+
+## HFA ~ Trial Type, self paypoff
+
+```{r load-data-hfa-resid-ttypesepf, echo =F, eval = T}
+
+### any subject general vars ###
+spec_vars <- c("*", "*")
+abs_beta_val <- F
+regions_to_combine <- c("All")
+
+## IR57 ##
+
+presentation_results_57 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR57",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR57", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_57 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR57",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR57", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_57 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR57",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR57", "final"),
+                                           freq = "hfa")
+
+
+
+
+ 
+
+## IR35 ##
+
+presentation_results_35 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR35",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR35", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_35 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR35",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR35", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_35 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR35",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR35", "final"),
+                                           freq = "hfa")
+
+
+
+## IR28 ##
+
+
+presentation_results_28 <- compile_results(regions = regions_to_combine, 
+                                           type = "pres-locked-unified-resids-selfp-cperm-hilbertRS", 
+                                           sub = "IR28", 
+                                           spec_vars = spec_vars, 
+                                           path = path(here(), "results", "IR28", "final"), 
+                                           freq = "hfa")
+
+pre_choice_results_28 <- compile_results(regions = regions_to_combine, 
+                                           type = "pre-choice-locked-unified-resids-selfp-cperm-hilbertRS", 
+                                           sub = "IR28", 
+                                           spec_vars = spec_vars, 
+                                           path = path(here(), "results", "IR28", "final"), 
+                                           freq = "hfa")
+
+post_choice_results_28 <- compile_results(regions = regions_to_combine, 
+                                           type = "post-choice-locked-unified-resids-selfp-cperm-hilbertRS", 
+                                           sub = "IR28", 
+                                           spec_vars = spec_vars, 
+                                           path = path(here(), "results", "IR28", "final"), 
+                                           freq = "hfa")
+
+## IR26 ##
+
+presentation_results_26 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR26",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR26", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_26 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR26",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR26", "final"),
+                                           freq = "hfa")
+
+post_choice_results_26 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR26",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR26", "final"),
+                                           freq = "hfa")
+
+
+## IR16 ##
+
+presentation_results_16 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR16",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR16", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_16 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR16",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR16", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_16 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR16",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR16", "final"),
+                                           freq = "hfa")
+
+
+## IR10 ##
+
+presentation_results_10 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR10",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR10", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_10 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR10",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR10", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_10 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR10",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR10", "final"),
+                                           freq = "hfa")
+
+
+## IR9 ##
+
+presentation_results_9 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR9", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_9 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR9", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_9 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR9", "final"),
+                                           freq = "hfa")
+
+## IR19 ##
+
+presentation_results_19 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR19",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR19", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_19 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR19",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR19", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_19 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR19",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR19", "final"),
+                                           freq = "hfa")
+
+## IR39 ##
+
+presentation_results_39 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR39",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR39", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_39 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR39",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR39", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_39 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "IR39",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR39", "final"),
+                                           freq = "hfa")
+
+## CP34 ##
+
+presentation_results_cp34 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "CP34",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "CP34", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_cp34 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "CP34",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "CP34", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_cp34 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "CP34",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "CP34", "final"),
+                                           freq = "hfa")
+
+## GP51 ##
+
+presentation_results_gp51 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "GP51",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "GP51", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_gp51 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "GP51",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "GP51", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_gp51 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "GP51",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "GP51", "final"),
+                                           freq = "hfa")
+
+## DA9 ##
+
+presentation_results_da9 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "DA9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "DA9", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_da9 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "DA9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "DA9", "final"),
+                                           freq = "hfa")
+
+post_choice_results_da9 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "DA9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "DA9", "final"),
+                                           freq = "hfa")
+
+## ST40 ##
+
+presentation_results_st40 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "ST40",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "ST40", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_st40 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "ST40",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "ST40", "final"),
+                                           freq = "hfa")
+
+post_choice_results_st40 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfp-cperm-hilbertRS",
+                                           sub = "ST40",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "ST40", "final"),
+                                           freq = "hfa")
+
+
+
+
+```
+
+```{r merge-single-files-hfa-ttypeselfp, echo = F, eval = T}
+
+
+# merge together
+results_IR57 <- rbind(presentation_results_57 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_57 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_57 %>% mutate(epoch = "post-choice"))
+
+results_IR35 <- rbind(presentation_results_35 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_35 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_35 %>% mutate(epoch = "post-choice"))
+
+results_IR28 <- rbind(presentation_results_28 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_28 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_28 %>% mutate(epoch = "post-choice"))
+
+results_IR26 <- rbind(presentation_results_26 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_26 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_26 %>% mutate(epoch = "post-choice"))
+
+results_IR16 <- rbind(presentation_results_16 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_16 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_16 %>% mutate(epoch = "post-choice"))
+
+# results_IR10 <- rbind(presentation_results_10 %>% mutate(epoch = "presentation"),
+#                       pre_choice_results_10 %>% mutate(epoch = "pre-choice"),
+#                       post_choice_results_10 %>% mutate(epoch = "post-choice"))
+
+results_IR9 <- rbind(presentation_results_9 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_9 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_9 %>% mutate(epoch = "post-choice"))
+
+# results_IR19 <- rbind(presentation_results_19 %>% mutate(epoch = "presentation"),
+#                       pre_choice_results_19 %>% mutate(epoch = "pre-choice"),
+#                       post_choice_results_19 %>% mutate(epoch = "post-choice"))
+
+results_IR39 <- rbind(presentation_results_39 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_39 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_39 %>% mutate(epoch = "post-choice"))
+
+results_GP51 <- rbind(presentation_results_gp51 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_gp51 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_gp51 %>% mutate(epoch = "post-choice"))
+
+results_DA9 <- rbind(presentation_results_da9 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_da9 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_da9 %>% mutate(epoch = "post-choice"))
+
+results_ST40 <- rbind(presentation_results_st40 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_st40 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_st40 %>% mutate(epoch = "post-choice"))
+
+# results_CP34 <- rbind(presentation_results_cp34 %>% mutate(epoch = "presentation"),
+#                       pre_choice_results_cp34 %>% mutate(epoch = "pre-choice"),
+#                       post_choice_results_cp34 %>% mutate(epoch = "post-choice"))
+
+# results_DA8 <- rbind(presentation_results_da8 %>% mutate(epoch = "presentation"),
+#                       pre_choice_results_da8 %>% mutate(epoch = "pre-choice"))
+
+merged_results <- rbind(results_IR57 %>% mutate(subject = "IR57"),
+                            results_IR39 %>% mutate(subject = "IR39"),
+                            results_IR35 %>% mutate(subject = "IR35"),
+                            results_IR28 %>% mutate(subject = "IR28"),
+                            results_IR26 %>% mutate(subject = "IR26"),
+                            # results_IR19 %>% mutate(subject = "IR19"),
+                            results_IR16 %>% mutate(subject = "IR16"),
+                            results_IR9 %>% mutate(subject = "IR9"),
+                            results_DA9 %>% mutate(subject = "DA9"),
+                            results_GP51 %>% mutate(subject = "GP51"),
+                            results_ST40 %>% mutate(subject = "ST40"))
+
+
+
+merged_results <- merged_results %>%
+          mutate(electrode = gsub("POL ", "", electrode)) %>%
+          mutate(electrode = gsub(" POL", "", electrode)) %>%
+          mutate(electrode = gsub("-Ref", "", electrode)) %>%
+          mutate(electrode = gsub("-Ref-", "-", electrode)) 
+
+
+# read in raw localizations data #
+# should be ofc, but some other regions might have snuck in #
+merge_all_subs_with_elec_info <- function(df, localizations, coords = FALSE) {
+## merge df with elec info, stored in localizations
+## creates new var of form ROI1-ROI2  
+## also cleans elec names
+  
+  # only the localization columns we need #
+  if(coords == TRUE){
+    localizations <- localizations %>% select(Electrode, subject, Coordinates, `Loc Meeting`)
+  } else {
+    localizations <- localizations %>% select(Electrode, subject, `Loc Meeting`)
+  }
+  
+  # clean the names
+  df <- df %>%
+    mutate(electrode = gsub("POL ", "", electrode)) %>%
+    mutate(electrode = gsub(" POL", "", electrode)) %>%
+    mutate(electrode = gsub("-Ref", "", electrode)) %>%
+    mutate(electrode = gsub("-Ref-", "-", electrode)) 
+  
+  # separate two electrodes
+  df <- df %>%
+    mutate(first_elec= gsub("-.*", "", electrode)) %>%
+    mutate(second_elec = gsub(".*-", "", electrode))
+  # join on first electrode
+  df <- left_join(df,
+                 localizations,
+                 by = c("subject" = "subject", "first_elec" = "Electrode"))
+  # rename to `first_region`
+  df <- df %>%
+    rename(first_region = `Loc Meeting`)
+  # join on second electrode and rename
+  df <-  left_join(df,
+             localizations,
+             by = c("subject" = "subject", "second_elec" = "Electrode")) %>%
+    rename(second_region = `Loc Meeting`) 
+  # paste into useful format
+  df <- df %>% mutate(ROI = paste0(first_region, "-", second_region))
+  
+  return(df)
+
+}
+
+good_predictors <- c("trial_type")
+
+localizations <- read_csv(path(here(), "munge", "combined_electrode_info_with_bob.csv"))
+
+
+## for main analyses ##
+localized_results_pres <- merge_all_subs_with_elec_info(merged_results, localizations)
+ofc_merged_results <- localized_results_pres %>%
+  filter(grepl("ofc", ROI, ignore.case = T) | grepl("orbit", ROI, ignore.case = T)) %>% 
+  mutate(predictor = gsub('[[:digit:]]+', "", predictor)) %>%
+  mutate(predictor = gsub("OFG_", "", predictor)) %>%
+  mutate(predictor = gsub("^FG_", "", predictor)) %>%
+  filter(predictor %in% good_predictors)
+
+write_csv(ofc_merged_results,
+          path(here(), "results", "single_regressions", "compiled_unified_ttype_selfp_residual_ogpermutation_ofc_results_5_15_2023.csv"))
+
+
+```
+
+## HFA ~ Trial Type, self offer
+
+```{r load-data-hfa-resid-ttypeselfo, echo =F, eval = T}
+
+### any subject general vars ###
+spec_vars <- c("*", "*")
+abs_beta_val <- F
+regions_to_combine <- c("All")
+
+## IR57 ##
+
+presentation_results_57 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR57",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR57", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_57 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR57",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR57", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_57 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR57",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR57", "final"),
+                                           freq = "hfa")
+
+
+
+
+ 
+
+## IR35 ##
+
+presentation_results_35 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR35",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR35", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_35 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR35",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR35", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_35 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR35",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR35", "final"),
+                                           freq = "hfa")
+
+
+
+## IR28 ##
+
+
+presentation_results_28 <- compile_results(regions = regions_to_combine, 
+                                           type = "pres-locked-unified-resids-selfo-cperm-hilbertRS", 
+                                           sub = "IR28", 
+                                           spec_vars = spec_vars, 
+                                           path = path(here(), "results", "IR28", "final"), 
+                                           freq = "hfa")
+
+pre_choice_results_28 <- compile_results(regions = regions_to_combine, 
+                                           type = "pre-choice-locked-unified-resids-selfo-cperm-hilbertRS", 
+                                           sub = "IR28", 
+                                           spec_vars = spec_vars, 
+                                           path = path(here(), "results", "IR28", "final"), 
+                                           freq = "hfa")
+
+post_choice_results_28 <- compile_results(regions = regions_to_combine, 
+                                           type = "post-choice-locked-unified-resids-selfo-cperm-hilbertRS", 
+                                           sub = "IR28", 
+                                           spec_vars = spec_vars, 
+                                           path = path(here(), "results", "IR28", "final"), 
+                                           freq = "hfa")
+
+## IR26 ##
+
+presentation_results_26 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR26",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR26", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_26 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR26",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR26", "final"),
+                                           freq = "hfa")
+
+post_choice_results_26 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR26",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR26", "final"),
+                                           freq = "hfa")
+
+
+## IR16 ##
+
+presentation_results_16 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR16",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR16", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_16 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR16",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR16", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_16 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR16",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR16", "final"),
+                                           freq = "hfa")
+
+
+## IR10 ##
+
+presentation_results_10 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR10",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR10", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_10 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR10",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR10", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_10 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR10",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR10", "final"),
+                                           freq = "hfa")
+
+
+## IR9 ##
+
+presentation_results_9 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR9", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_9 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR9", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_9 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR9", "final"),
+                                           freq = "hfa")
+
+## IR19 ##
+
+presentation_results_19 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR19",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR19", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_19 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR19",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR19", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_19 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR19",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR19", "final"),
+                                           freq = "hfa")
+
+## IR39 ##
+
+presentation_results_39 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR39",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR39", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_39 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR39",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR39", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_39 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "IR39",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR39", "final"),
+                                           freq = "hfa")
+
+## CP34 ##
+
+presentation_results_cp34 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "CP34",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "CP34", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_cp34 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "CP34",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "CP34", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_cp34 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "CP34",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "CP34", "final"),
+                                           freq = "hfa")
+
+## GP51 ##
+
+presentation_results_gp51 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "GP51",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "GP51", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_gp51 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "GP51",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "GP51", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_gp51 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "GP51",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "GP51", "final"),
+                                           freq = "hfa")
+
+## DA9 ##
+
+presentation_results_da9 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "DA9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "DA9", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_da9 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "DA9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "DA9", "final"),
+                                           freq = "hfa")
+
+post_choice_results_da9 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "DA9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "DA9", "final"),
+                                           freq = "hfa")
+
+## ST40 ##
+
+presentation_results_st40 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "ST40",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "ST40", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_st40 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "ST40",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "ST40", "final"),
+                                           freq = "hfa")
+
+post_choice_results_st40 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-selfo-cperm-hilbertRS",
+                                           sub = "ST40",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "ST40", "final"),
+                                           freq = "hfa")
+
+
+
+
+```
+
+```{r merge-single-files-hfa-ttypeselfo, echo = F, eval = T}
+
+
+# merge together
+results_IR57 <- rbind(presentation_results_57 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_57 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_57 %>% mutate(epoch = "post-choice"))
+
+results_IR35 <- rbind(presentation_results_35 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_35 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_35 %>% mutate(epoch = "post-choice"))
+
+results_IR28 <- rbind(presentation_results_28 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_28 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_28 %>% mutate(epoch = "post-choice"))
+
+results_IR26 <- rbind(presentation_results_26 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_26 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_26 %>% mutate(epoch = "post-choice"))
+
+results_IR16 <- rbind(presentation_results_16 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_16 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_16 %>% mutate(epoch = "post-choice"))
+
+# results_IR10 <- rbind(presentation_results_10 %>% mutate(epoch = "presentation"),
+#                       pre_choice_results_10 %>% mutate(epoch = "pre-choice"),
+#                       post_choice_results_10 %>% mutate(epoch = "post-choice"))
+
+results_IR9 <- rbind(presentation_results_9 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_9 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_9 %>% mutate(epoch = "post-choice"))
+
+# results_IR19 <- rbind(presentation_results_19 %>% mutate(epoch = "presentation"),
+#                       pre_choice_results_19 %>% mutate(epoch = "pre-choice"),
+#                       post_choice_results_19 %>% mutate(epoch = "post-choice"))
+
+results_IR39 <- rbind(presentation_results_39 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_39 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_39 %>% mutate(epoch = "post-choice"))
+
+results_GP51 <- rbind(presentation_results_gp51 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_gp51 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_gp51 %>% mutate(epoch = "post-choice"))
+
+results_DA9 <- rbind(presentation_results_da9 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_da9 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_da9 %>% mutate(epoch = "post-choice"))
+
+results_ST40 <- rbind(presentation_results_st40 %>% mutate(epoch = "presentation"),
+                      pre_choice_results_st40 %>% mutate(epoch = "pre-choice"),
+                      post_choice_results_st40 %>% mutate(epoch = "post-choice"))
+
+# results_CP34 <- rbind(presentation_results_cp34 %>% mutate(epoch = "presentation"),
+#                       pre_choice_results_cp34 %>% mutate(epoch = "pre-choice"),
+#                       post_choice_results_cp34 %>% mutate(epoch = "post-choice"))
+
+# results_DA8 <- rbind(presentation_results_da8 %>% mutate(epoch = "presentation"),
+#                       pre_choice_results_da8 %>% mutate(epoch = "pre-choice"))
+
+merged_results <- rbind(results_IR57 %>% mutate(subject = "IR57"),
+                            results_IR39 %>% mutate(subject = "IR39"),
+                            results_IR35 %>% mutate(subject = "IR35"),
+                            results_IR28 %>% mutate(subject = "IR28"),
+                            results_IR26 %>% mutate(subject = "IR26"),
+                            # results_IR19 %>% mutate(subject = "IR19"),
+                            results_IR16 %>% mutate(subject = "IR16"),
+                            results_IR9 %>% mutate(subject = "IR9"),
+                            results_DA9 %>% mutate(subject = "DA9"),
+                            results_GP51 %>% mutate(subject = "GP51"),
+                            results_ST40 %>% mutate(subject = "ST40"))
+
+
+
+merged_results <- merged_results %>%
+          mutate(electrode = gsub("POL ", "", electrode)) %>%
+          mutate(electrode = gsub(" POL", "", electrode)) %>%
+          mutate(electrode = gsub("-Ref", "", electrode)) %>%
+          mutate(electrode = gsub("-Ref-", "-", electrode)) 
+
+
+# read in raw localizations data #
+# should be ofc, but some other regions might have snuck in #
+merge_all_subs_with_elec_info <- function(df, localizations, coords = FALSE) {
+## merge df with elec info, stored in localizations
+## creates new var of form ROI1-ROI2  
+## also cleans elec names
+  
+  # only the localization columns we need #
+  if(coords == TRUE){
+    localizations <- localizations %>% select(Electrode, subject, Coordinates, `Loc Meeting`)
+  } else {
+    localizations <- localizations %>% select(Electrode, subject, `Loc Meeting`)
+  }
+  
+  # clean the names
+  df <- df %>%
+    mutate(electrode = gsub("POL ", "", electrode)) %>%
+    mutate(electrode = gsub(" POL", "", electrode)) %>%
+    mutate(electrode = gsub("-Ref", "", electrode)) %>%
+    mutate(electrode = gsub("-Ref-", "-", electrode)) 
+  
+  # separate two electrodes
+  df <- df %>%
+    mutate(first_elec= gsub("-.*", "", electrode)) %>%
+    mutate(second_elec = gsub(".*-", "", electrode))
+  # join on first electrode
+  df <- left_join(df,
+                 localizations,
+                 by = c("subject" = "subject", "first_elec" = "Electrode"))
+  # rename to `first_region`
+  df <- df %>%
+    rename(first_region = `Loc Meeting`)
+  # join on second electrode and rename
+  df <-  left_join(df,
+             localizations,
+             by = c("subject" = "subject", "second_elec" = "Electrode")) %>%
+    rename(second_region = `Loc Meeting`) 
+  # paste into useful format
+  df <- df %>% mutate(ROI = paste0(first_region, "-", second_region))
+  
+  return(df)
+
+}
+
+good_predictors <- c("trial_type")
+
+localizations <- read_csv(path(here(), "munge", "combined_electrode_info_with_bob.csv"))
+
+
+## for main analyses ##
+localized_results_pres <- merge_all_subs_with_elec_info(merged_results, localizations)
+ofc_merged_results <- localized_results_pres %>%
+  filter(grepl("ofc", ROI, ignore.case = T) | grepl("orbit", ROI, ignore.case = T)) %>% 
+  mutate(predictor = gsub('[[:digit:]]+', "", predictor)) %>%
+  mutate(predictor = gsub("OFG_", "", predictor)) %>%
+  mutate(predictor = gsub("^FG_", "", predictor)) %>%
+  filter(predictor %in% good_predictors)
+
+write_csv(ofc_merged_results,
+          path(here(), "results", "single_regressions", "compiled_unified_ttype_selfo_residual_ogpermutation_ofc_results_5_15_2023.csv"))
+
+
+```
+
+
+## HFA ~ Self vs Other Offer Residuals
+
+```{r load-data-hfa, echo =F, eval = T}
+
+### any subject general vars ###
+spec_vars <- c("*", "*")
+abs_beta_val <- F
+regions_to_combine <- c("All")
+
+## IR57 ##
+
+presentation_results_57 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR57",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR57", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_57 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR57",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR57", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_57 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR57",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR57", "final"),
+                                           freq = "hfa")
+
+
+
+
+ 
+
+## IR35 ##
+
+presentation_results_35 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR35",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR35", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_35 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR35",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR35", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_35 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR35",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR35", "final"),
+                                           freq = "hfa")
+
+
+
+## IR28 ##
+
+
+presentation_results_28 <- compile_results(regions = regions_to_combine, 
+                                           type = "pres-locked-unified-resids-cperm-hilbertRS", 
+                                           sub = "IR28", 
+                                           spec_vars = spec_vars, 
+                                           path = path(here(), "results", "IR28", "final"), 
+                                           freq = "hfa")
+
+pre_choice_results_28 <- compile_results(regions = regions_to_combine, 
+                                           type = "pre-choice-locked-unified-resids-cperm-hilbertRS", 
+                                           sub = "IR28", 
+                                           spec_vars = spec_vars, 
+                                           path = path(here(), "results", "IR28", "final"), 
+                                           freq = "hfa")
+
+post_choice_results_28 <- compile_results(regions = regions_to_combine, 
+                                           type = "post-choice-locked-unified-resids-cperm-hilbertRS", 
+                                           sub = "IR28", 
+                                           spec_vars = spec_vars, 
+                                           path = path(here(), "results", "IR28", "final"), 
+                                           freq = "hfa")
+
+## IR26 ##
+
+presentation_results_26 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR26",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR26", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_26 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR26",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR26", "final"),
+                                           freq = "hfa")
+
+post_choice_results_26 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR26",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR26", "final"),
+                                           freq = "hfa")
+
+
+## IR16 ##
+
+presentation_results_16 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR16",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR16", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_16 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR16",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR16", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_16 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR16",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR16", "final"),
+                                           freq = "hfa")
+
+
+## IR10 ##
+
+presentation_results_10 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR10",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR10", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_10 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR10",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR10", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_10 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR10",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR10", "final"),
+                                           freq = "hfa")
+
+
+## IR9 ##
+
+presentation_results_9 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR9", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_9 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR9", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_9 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR9", "final"),
+                                           freq = "hfa")
+
+## IR19 ##
+
+presentation_results_19 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR19",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR19", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_19 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR19",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR19", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_19 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR19",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR19", "final"),
+                                           freq = "hfa")
+
+## IR39 ##
+
+presentation_results_39 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR39",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR39", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_39 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR39",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR39", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_39 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "IR39",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "IR39", "final"),
+                                           freq = "hfa")
+
+## CP34 ##
+
+presentation_results_cp34 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "CP34",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "CP34", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_cp34 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "CP34",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "CP34", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_cp34 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "CP34",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "CP34", "final"),
+                                           freq = "hfa")
+
+## GP51 ##
+
+presentation_results_gp51 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "GP51",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "GP51", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_gp51 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "GP51",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "GP51", "final"),
+                                           freq = "hfa")
+
+
+post_choice_results_gp51 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "GP51",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "GP51", "final"),
+                                           freq = "hfa")
+
+## DA9 ##
+
+presentation_results_da9 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "DA9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "DA9", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_da9 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "DA9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "DA9", "final"),
+                                           freq = "hfa")
+
+post_choice_results_da9 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "DA9",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "DA9", "final"),
+                                           freq = "hfa")
+
+## ST40 ##
+
+presentation_results_st40 <- compile_results(regions = regions_to_combine,
+                                           type = "pres-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "ST40",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "ST40", "final"),
+                                           freq = "hfa")
+
+
+pre_choice_results_st40 <- compile_results(regions = regions_to_combine,
+                                           type = "pre-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "ST40",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "ST40", "final"),
+                                           freq = "hfa")
+
+post_choice_results_st40 <- compile_results(regions = regions_to_combine,
+                                           type = "post-choice-locked-unified-resids-cperm-hilbertRS",
+                                           sub = "ST40",
+                                           spec_vars = spec_vars,
+                                           path = path(here(), "results", "ST40", "final"),
+                                           freq = "hfa")
+
+# ## DA8 ##
+# 
+# presentation_results_da8 <- compile_results(regions = regions_to_combine,
+#                                            type = "pres-locked-unified-resids-cperm-hilbertRS",
+#                                            sub = "DA8",
+#                                            spec_vars = spec_vars,
+#                                            path = path(here(), "results", "DA8", "final"),
+#                                            freq = "hfa")
+# 
+# 
+# pre_choice_results_da8 <- compile_results(regions = regions_to_combine,
+#                                            type = "pre-choice-locked-unified-resids-cperm-hilbertRS",
+#                                            sub = "DA8",
+#                                            spec_vars = spec_vars,
+#                                            path = path(here(), "results", "DA8", "final"),
+#                                            freq = "hfa")
+
+
+# post_choice_results_da8 <- compile_results(regions = regions_to_combine,
+#                                            type = "post-choice-locked-unified-resids-cperm-hilbertRS",
+#                                            sub = "DA8",
+#                                            spec_vars = spec_vars,
+#                                            path = path(here(), "results", "DA8", "final"),
+#                                            freq = "hfa")
+
+
+```
 
 ```{r merge-single-files-hfa, echo = F, eval = T}
 
@@ -532,13 +2041,17 @@ merged_results <- merged_results %>%
 
 # read in raw localizations data #
 # should be ofc, but some other regions might have snuck in #
-merge_all_subs_with_elec_info <- function(df, localizations) {
+merge_all_subs_with_elec_info <- function(df, localizations, coords = FALSE) {
 ## merge df with elec info, stored in localizations
 ## creates new var of form ROI1-ROI2  
 ## also cleans elec names
   
   # only the localization columns we need #
-  localizations <- localizations %>% select(Electrode, subject, `Loc Meeting`)
+  if(coords == TRUE){
+    localizations <- localizations %>% select(Electrode, subject, Coordinates, `Loc Meeting`)
+  } else {
+    localizations <- localizations %>% select(Electrode, subject, `Loc Meeting`)
+  }
   
   # clean the names
   df <- df %>%
@@ -570,28 +2083,43 @@ merge_all_subs_with_elec_info <- function(df, localizations) {
 
 }
 
-bad_predictors <- c("self_var_payoff_adv", "self_var_payoff_dis", "other_var_payoff_adv", "other_var_payoff_dis", "more_or_none")
+good_predictors <- c("self_var_payoff", "other_var_payoff")
 
 localizations <- read_csv(path(here(), "munge", "combined_electrode_info_with_bob.csv"))
+
+## for anatomical analyses ##
+# localized_results_anatomy <- merge_all_subs_with_elec_info(merged_results, localizations, coords = T)
+# ofc_merged_results_anat <- localized_results_anatomy %>%
+#   filter(grepl("ofc", ROI, ignore.case = T) | grepl("orbit", ROI, ignore.case = T)) %>%
+#   mutate(predictor = gsub('[[:digit:]]+', "", predictor)) %>%
+#   mutate(predictor = gsub("OFG_", "", predictor)) %>%
+#   mutate(predictor = gsub("^FG_", "", predictor)) %>%
+#   filter(predictor %in% bad_predictors)
+# 
+# write_csv(ofc_merged_results_anat,
+#           path(here(), "results", "single_regressions", "compiled_unified_ogpermutation_ofc_results_1_26_2022_anatomy.csv"))
+
+## for main analyses ##
 localized_results_pres <- merge_all_subs_with_elec_info(merged_results, localizations)
 ofc_merged_results <- localized_results_pres %>%
   filter(grepl("ofc", ROI, ignore.case = T) | grepl("orbit", ROI, ignore.case = T)) %>% 
   mutate(predictor = gsub('[[:digit:]]+', "", predictor)) %>%
   mutate(predictor = gsub("OFG_", "", predictor)) %>%
   mutate(predictor = gsub("^FG_", "", predictor)) %>%
-  filter(!predictor %in% bad_predictors)
+  filter(predictor %in% good_predictors)
 cing_merged_results <- localized_results_pres %>%
    filter(grepl("cing", ROI, ignore.case = T) | grepl("CC", ROI, ignore.case = T)) %>% 
    filter(!grepl("occipital", ROI, ignore.case = T)) %>%
-  filter(!predictor %in% bad_predictors)
+  filter(predictor %in% good_predictors)
 
-write_csv(ofc_merged_results, 
-          path(here(), "results", "single_regressions", "compiled_unified_ogpermutation_ofc_results_1_26_2022.csv"))
-write_csv(cing_merged_results, 
-          path(here(), "results", "single_regressions", "compiled_unified_ogpermutation_cingulate_results_1_26_2022.csv"))
+write_csv(ofc_merged_results,
+          path(here(), "results", "single_regressions", "compiled_unified_residual_ogpermutation_ofc_results_1_26_2022.csv"))
+write_csv(cing_merged_results,
+          path(here(), "results", "single_regressions", "compiled_unified_residual_ogpermutation_cingulate_results_1_26_2022.csv"))
 
 
 ```
+
 
 ## Theta
 
@@ -608,23 +2136,23 @@ presentation_results_57 <- compile_results(regions = regions_to_combine,
                                            type = "pres-locked-unified_cperm-hilbertRS",
                                            sub = "IR57",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR57", "final", "theta"),
+                                           path = path(here(), "results", "IR57", "final"),
                                            freq = "theta")
 
 
 pre_choice_results_57 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "IR57",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR57", "final", "theta"),
+                                           path = path(here(), "results", "IR57", "final"),
                                            freq = "theta")
 
 
 post_choice_results_57 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "IR57",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR57", "final", "theta"),
+                                           path = path(here(), "results", "IR57", "final"),
                                            freq = "theta")
 
 
@@ -638,23 +2166,23 @@ presentation_results_35 <- compile_results(regions = regions_to_combine,
                                            type = "pres-locked-unified_cperm-hilbertRS",
                                            sub = "IR35",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR35", "final", "theta"),
+                                           path = path(here(), "results", "IR35", "final"),
                                            freq = "theta")
 
 
 pre_choice_results_35 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "IR35",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR35", "final", "theta"),
+                                           path = path(here(), "results", "IR35", "final"),
                                            freq = "theta")
 
 
 post_choice_results_35 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "IR35",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR35", "final", "theta"),
+                                           path = path(here(), "results", "IR35", "final"),
                                            freq = "theta")
 
 
@@ -666,21 +2194,21 @@ presentation_results_28 <- compile_results(regions = regions_to_combine,
                                            type = "pres-locked-unified_cperm-hilbertRS", 
                                            sub = "IR28", 
                                            spec_vars = spec_vars, 
-                                           path = path(here(), "results", "IR28", "final", "theta"), 
+                                           path = path(here(), "results", "IR28", "final"), 
                                            freq = "theta")
 
 pre_choice_results_28 <- compile_results(regions = regions_to_combine, 
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS", 
+                                           type = "pre-choice-locked-comb-only-hilbertRS", 
                                            sub = "IR28", 
                                            spec_vars = spec_vars, 
-                                           path = path(here(), "results", "IR28", "final", "theta"), 
+                                           path = path(here(), "results", "IR28", "final"), 
                                            freq = "theta")
 
 post_choice_results_28 <- compile_results(regions = regions_to_combine, 
-                                           type = "post-choice-locked-unified_cperm-hilbertRS", 
+                                           type = "post-choice-locked-comb-only-hilbertRS", 
                                            sub = "IR28", 
                                            spec_vars = spec_vars, 
-                                           path = path(here(), "results", "IR28", "final", "theta"), 
+                                           path = path(here(), "results", "IR28", "final"), 
                                            freq = "theta")
 
 ## IR26 ##
@@ -689,22 +2217,22 @@ presentation_results_26 <- compile_results(regions = regions_to_combine,
                                            type = "pres-locked-unified_cperm-hilbertRS",
                                            sub = "IR26",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR26", "final", "theta"),
+                                           path = path(here(), "results", "IR26", "final"),
                                            freq = "theta")
 
 
 pre_choice_results_26 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "IR26",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR26", "final", "theta"),
+                                           path = path(here(), "results", "IR26", "final"),
                                            freq = "theta")
 
 post_choice_results_26 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "IR26",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR26", "final", "theta"),
+                                           path = path(here(), "results", "IR26", "final"),
                                            freq = "theta")
 
 
@@ -714,23 +2242,23 @@ presentation_results_16 <- compile_results(regions = regions_to_combine,
                                            type = "pres-locked-unified_cperm-hilbertRS",
                                            sub = "IR16",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR16", "final", "theta"),
+                                           path = path(here(), "results", "IR16", "final"),
                                            freq = "theta")
 
 
 pre_choice_results_16 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "IR16",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR16", "final", "theta"),
+                                           path = path(here(), "results", "IR16", "final"),
                                            freq = "theta")
 
 
 post_choice_results_16 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "IR16",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR16", "final", "theta"),
+                                           path = path(here(), "results", "IR16", "final"),
                                            freq = "theta")
 
 
@@ -740,23 +2268,23 @@ presentation_results_10 <- compile_results(regions = regions_to_combine,
                                            type = "pres-locked-unified_cperm-hilbertRS",
                                            sub = "IR10",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR10", "final", "theta"),
+                                           path = path(here(), "results", "IR10", "final"),
                                            freq = "theta")
 
 
 pre_choice_results_10 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "IR10",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR10", "final", "theta"),
+                                           path = path(here(), "results", "IR10", "final"),
                                            freq = "theta")
 
 
 post_choice_results_10 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "IR10",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR10", "final", "theta"),
+                                           path = path(here(), "results", "IR10", "final"),
                                            freq = "theta")
 
 
@@ -766,23 +2294,23 @@ presentation_results_9 <- compile_results(regions = regions_to_combine,
                                            type = "pres-locked-unified_cperm-hilbertRS",
                                            sub = "IR9",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR9", "final", "theta"),
+                                           path = path(here(), "results", "IR9", "final"),
                                            freq = "theta")
 
 
 pre_choice_results_9 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "IR9",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR9", "final", "theta"),
+                                           path = path(here(), "results", "IR9", "final"),
                                            freq = "theta")
 
 
 post_choice_results_9 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "IR9",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR9", "final", "theta"),
+                                           path = path(here(), "results", "IR9", "final"),
                                            freq = "theta")
 
 ## IR19 ##
@@ -791,23 +2319,23 @@ presentation_results_19 <- compile_results(regions = regions_to_combine,
                                            type = "pres-locked-unified_cperm-hilbertRS",
                                            sub = "IR19",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR19", "final", "theta"),
+                                           path = path(here(), "results", "IR19", "final"),
                                            freq = "theta")
 
 
 pre_choice_results_19 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "IR19",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR19", "final", "theta"),
+                                           path = path(here(), "results", "IR19", "final"),
                                            freq = "theta")
 
 
 post_choice_results_19 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "IR19",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR19", "final", "theta"),
+                                           path = path(here(), "results", "IR19", "final"),
                                            freq = "theta")
 
 ## IR39 ##
@@ -816,23 +2344,23 @@ presentation_results_39 <- compile_results(regions = regions_to_combine,
                                            type = "pres-locked-unified_cperm-hilbertRS",
                                            sub = "IR39",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR39", "final", "theta"),
+                                           path = path(here(), "results", "IR39", "final"),
                                            freq = "theta")
 
 
 pre_choice_results_39 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "IR39",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR39", "final", "theta"),
+                                           path = path(here(), "results", "IR39", "final"),
                                            freq = "theta")
 
 
 post_choice_results_39 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "IR39",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "IR39", "final", "theta"),
+                                           path = path(here(), "results", "IR39", "final"),
                                            freq = "theta")
 
 ## CP34 ##
@@ -841,23 +2369,23 @@ presentation_results_cp34 <- compile_results(regions = regions_to_combine,
                                            type = "pres-locked-unified_cperm-hilbertRS",
                                            sub = "CP34",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "CP34", "final", "theta"),
+                                           path = path(here(), "results", "CP34", "final"),
                                            freq = "theta")
 
 
 pre_choice_results_cp34 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "CP34",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "CP34", "final", "theta"),
+                                           path = path(here(), "results", "CP34", "final"),
                                            freq = "theta")
 
 
 post_choice_results_cp34 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "CP34",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "CP34", "final", "theta"),
+                                           path = path(here(), "results", "CP34", "final"),
                                            freq = "theta")
 
 ## GP51 ##
@@ -866,23 +2394,23 @@ presentation_results_gp51 <- compile_results(regions = regions_to_combine,
                                            type = "pres-locked-unified_cperm-hilbertRS",
                                            sub = "GP51",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "GP51", "final", "theta"),
+                                           path = path(here(), "results", "GP51", "final"),
                                            freq = "theta")
 
 
 pre_choice_results_gp51 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "GP51",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "GP51", "final", "theta"),
+                                           path = path(here(), "results", "GP51", "final"),
                                            freq = "theta")
 
 
 post_choice_results_gp51 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "GP51",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "GP51", "final", "theta"),
+                                           path = path(here(), "results", "GP51", "final"),
                                            freq = "theta")
 
 ## DA9 ##
@@ -891,22 +2419,22 @@ presentation_results_da9 <- compile_results(regions = regions_to_combine,
                                            type = "pres-locked-unified_cperm-hilbertRS",
                                            sub = "DA9",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "DA9", "final", "theta"),
+                                           path = path(here(), "results", "DA9", "final"),
                                            freq = "theta")
 
 
 pre_choice_results_da9 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "DA9",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "DA9", "final", "theta"),
+                                           path = path(here(), "results", "DA9", "final"),
                                            freq = "theta")
 
 post_choice_results_da9 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "DA9",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "DA9", "final", "theta"),
+                                           path = path(here(), "results", "DA9", "final"),
                                            freq = "theta")
 
 ## ST40 ##
@@ -915,22 +2443,22 @@ presentation_results_st40 <- compile_results(regions = regions_to_combine,
                                            type = "pres-locked-unified_cperm-hilbertRS",
                                            sub = "ST40",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "ST40", "final", "theta"),
+                                           path = path(here(), "results", "ST40", "final"),
                                            freq = "theta")
 
 
 pre_choice_results_st40 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "ST40",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "ST40", "final", "theta"),
+                                           path = path(here(), "results", "ST40", "final"),
                                            freq = "theta")
 
 post_choice_results_st40 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "ST40",
                                            spec_vars = spec_vars,
-                                           path = path(here(), "results", "ST40", "final", "theta"),
+                                           path = path(here(), "results", "ST40", "final"),
                                            freq = "theta")
 
 # ## DA8 ##
@@ -939,23 +2467,23 @@ post_choice_results_st40 <- compile_results(regions = regions_to_combine,
 #                                            type = "pres-locked-unified_cperm-hilbertRS",
 #                                            sub = "DA8",
 #                                            spec_vars = spec_vars,
-#                                            path = path(here(), "results", "DA8", "final", "theta"),
+#                                            path = path(here(), "results", "DA8", "final"),
 #                                            freq = "theta")
 # 
 # 
 # pre_choice_results_da8 <- compile_results(regions = regions_to_combine,
-#                                            type = "pre-choice-locked-unified_cperm-hilbertRS",
+#                                            type = "pre-choice-locked-comb-only-hilbertRS",
 #                                            sub = "DA8",
 #                                            spec_vars = spec_vars,
-#                                            path = path(here(), "results", "DA8", "final", "theta"),
+#                                            path = path(here(), "results", "DA8", "final"),
 #                                            freq = "theta")
 
 
 # post_choice_results_da8 <- compile_results(regions = regions_to_combine,
-#                                            type = "post-choice-locked-unified_cperm-hilbertRS",
+#                                            type = "post-choice-locked-comb-only-hilbertRS",
 #                                            sub = "DA8",
 #                                            spec_vars = spec_vars,
-#                                            path = path(here(), "results", "DA8", "final", "theta"),
+#                                            path = path(here(), "results", "DA8", "final"),
 #                                            freq = "theta")
 
 
@@ -1081,7 +2609,7 @@ merge_all_subs_with_elec_info <- function(df, localizations) {
 
 }
 
-bad_predictors <- c("self_var_payoff_adv", "self_var_payoff_dis", "other_var_payoff_adv", "other_var_payoff_dis", "more_or_none")
+good_predictors <- c("self_var_payoff", "trial_type", "other_var_payoff", "max", "min")
 
 localizations <- read_csv(path(here(), "munge", "combined_electrode_info_with_bob.csv"))
 localized_results_pres <- merge_all_subs_with_elec_info(merged_results, localizations)
@@ -1090,16 +2618,16 @@ ofc_merged_results <- localized_results_pres %>%
   mutate(predictor = gsub('[[:digit:]]+', "", predictor)) %>%
   mutate(predictor = gsub("OFG_", "", predictor)) %>%
   mutate(predictor = gsub("^FG_", "", predictor)) %>%
-  filter(!predictor %in% bad_predictors)
+  filter(predictor %in% good_predictors)
 cing_merged_results <- localized_results_pres %>%
    filter(grepl("cing", ROI, ignore.case = T) | grepl("CC", ROI, ignore.case = T)) %>% 
    filter(!grepl("occipital", ROI, ignore.case = T)) %>%
-  filter(!predictor %in% bad_predictors)
+  filter(predictor %in% good_predictors)
 
 write_csv(ofc_merged_results, 
-          path(here(), "results", "single_regressions", "compiled_comb_only_ofc_theta_results_1_4_2022.csv"))
+          path(here(), "results", "single_regressions", "compiled_unified_ogpermutation_ofc_theta_results_10_4_2022.csv"))
 write_csv(cing_merged_results, 
-          path(here(), "results", "single_regressions", "compiled_comb_only_cingulate_theta_results_1_4_2022.csv"))
+          path(here(), "results", "single_regressions", "compiled_unified_ogpermutation_cingulate_theta_results_10_4_2022.csv"))
 
 
 ```
@@ -1125,7 +2653,7 @@ presentation_results_57 <- compile_results(regions = regions_to_combine,
 
 
 pre_choice_results_57 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "IR57",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "IR57", "final", "delta"),
@@ -1133,7 +2661,7 @@ pre_choice_results_57 <- compile_results(regions = regions_to_combine,
 
 
 post_choice_results_57 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "IR57",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "IR57", "final", "delta"),
@@ -1155,7 +2683,7 @@ presentation_results_35 <- compile_results(regions = regions_to_combine,
 
 
 pre_choice_results_35 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "IR35",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "IR35", "final", "delta"),
@@ -1163,7 +2691,7 @@ pre_choice_results_35 <- compile_results(regions = regions_to_combine,
 
 
 post_choice_results_35 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "IR35",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "IR35", "final", "delta"),
@@ -1182,14 +2710,14 @@ presentation_results_28 <- compile_results(regions = regions_to_combine,
                                            freq = "delta")
 
 pre_choice_results_28 <- compile_results(regions = regions_to_combine, 
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS", 
+                                           type = "pre-choice-locked-comb-only-hilbertRS", 
                                            sub = "IR28", 
                                            spec_vars = spec_vars, 
                                            path = path(here(), "results", "IR28", "final", "delta"), 
                                            freq = "delta")
 
 post_choice_results_28 <- compile_results(regions = regions_to_combine, 
-                                           type = "post-choice-locked-unified_cperm-hilbertRS", 
+                                           type = "post-choice-locked-comb-only-hilbertRS", 
                                            sub = "IR28", 
                                            spec_vars = spec_vars, 
                                            path = path(here(), "results", "IR28", "final", "delta"), 
@@ -1206,14 +2734,14 @@ presentation_results_26 <- compile_results(regions = regions_to_combine,
 
 
 pre_choice_results_26 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "IR26",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "IR26", "final", "delta"),
                                            freq = "delta")
 
 post_choice_results_26 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "IR26",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "IR26", "final", "delta"),
@@ -1231,7 +2759,7 @@ presentation_results_16 <- compile_results(regions = regions_to_combine,
 
 
 pre_choice_results_16 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "IR16",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "IR16", "final", "delta"),
@@ -1239,7 +2767,7 @@ pre_choice_results_16 <- compile_results(regions = regions_to_combine,
 
 
 post_choice_results_16 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "IR16",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "IR16", "final", "delta"),
@@ -1257,7 +2785,7 @@ presentation_results_10 <- compile_results(regions = regions_to_combine,
 
 
 pre_choice_results_10 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "IR10",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "IR10", "final", "delta"),
@@ -1265,7 +2793,7 @@ pre_choice_results_10 <- compile_results(regions = regions_to_combine,
 
 
 post_choice_results_10 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "IR10",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "IR10", "final", "delta"),
@@ -1283,7 +2811,7 @@ presentation_results_9 <- compile_results(regions = regions_to_combine,
 
 
 pre_choice_results_9 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "IR9",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "IR9", "final", "delta"),
@@ -1291,7 +2819,7 @@ pre_choice_results_9 <- compile_results(regions = regions_to_combine,
 
 
 post_choice_results_9 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "IR9",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "IR9", "final", "delta"),
@@ -1308,7 +2836,7 @@ presentation_results_19 <- compile_results(regions = regions_to_combine,
 
 
 pre_choice_results_19 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "IR19",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "IR19", "final", "delta"),
@@ -1316,7 +2844,7 @@ pre_choice_results_19 <- compile_results(regions = regions_to_combine,
 
 
 post_choice_results_19 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "IR19",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "IR19", "final", "delta"),
@@ -1333,7 +2861,7 @@ presentation_results_39 <- compile_results(regions = regions_to_combine,
 
 
 pre_choice_results_39 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "IR39",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "IR39", "final", "delta"),
@@ -1341,7 +2869,7 @@ pre_choice_results_39 <- compile_results(regions = regions_to_combine,
 
 
 post_choice_results_39 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "IR39",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "IR39", "final", "delta"),
@@ -1358,7 +2886,7 @@ presentation_results_cp34 <- compile_results(regions = regions_to_combine,
 
 
 pre_choice_results_cp34 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "CP34",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "CP34", "final", "delta"),
@@ -1366,7 +2894,7 @@ pre_choice_results_cp34 <- compile_results(regions = regions_to_combine,
 
 
 post_choice_results_cp34 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "CP34",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "CP34", "final", "delta"),
@@ -1383,7 +2911,7 @@ presentation_results_gp51 <- compile_results(regions = regions_to_combine,
 
 
 pre_choice_results_gp51 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "GP51",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "GP51", "final", "delta"),
@@ -1391,7 +2919,7 @@ pre_choice_results_gp51 <- compile_results(regions = regions_to_combine,
 
 
 post_choice_results_gp51 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "GP51",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "GP51", "final", "delta"),
@@ -1408,14 +2936,14 @@ presentation_results_da9 <- compile_results(regions = regions_to_combine,
 
 
 pre_choice_results_da9 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "DA9",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "DA9", "final", "delta"),
                                            freq = "delta")
 
 post_choice_results_da9 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "DA9",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "DA9", "final", "delta"),
@@ -1432,14 +2960,14 @@ presentation_results_st40 <- compile_results(regions = regions_to_combine,
 
 
 pre_choice_results_st40 <- compile_results(regions = regions_to_combine,
-                                           type = "pre-choice-locked-unified_cperm-hilbertRS",
+                                           type = "pre-choice-locked-comb-only-hilbertRS",
                                            sub = "ST40",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "ST40", "final", "delta"),
                                            freq = "delta")
 
 post_choice_results_st40 <- compile_results(regions = regions_to_combine,
-                                           type = "post-choice-locked-unified_cperm-hilbertRS",
+                                           type = "post-choice-locked-comb-only-hilbertRS",
                                            sub = "ST40",
                                            spec_vars = spec_vars,
                                            path = path(here(), "results", "ST40", "final", "delta"),
@@ -1456,7 +2984,7 @@ post_choice_results_st40 <- compile_results(regions = regions_to_combine,
 # 
 # 
 # pre_choice_results_da8 <- compile_results(regions = regions_to_combine,
-#                                            type = "pre-choice-locked-unified_cperm-hilbertRS",
+#                                            type = "pre-choice-locked-comb-only-hilbertRS",
 #                                            sub = "DA8",
 #                                            spec_vars = spec_vars,
 #                                            path = path(here(), "results", "DA8", "final", "delta"),
@@ -1464,7 +2992,7 @@ post_choice_results_st40 <- compile_results(regions = regions_to_combine,
 
 
 # post_choice_results_da8 <- compile_results(regions = regions_to_combine,
-#                                            type = "post-choice-locked-unified_cperm-hilbertRS",
+#                                            type = "post-choice-locked-comb-only-hilbertRS",
 #                                            sub = "DA8",
 #                                            spec_vars = spec_vars,
 #                                            path = path(here(), "results", "DA8", "final", "delta"),

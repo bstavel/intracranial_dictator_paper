@@ -39,11 +39,10 @@ library(viridis)
 library(lmtest)
 library(gt)
 library(ggalluvial)
-library(parameters)
 library(factoextra)
 library(NbClust)
-library(effectsize)
 library(lme4)
+library(afex)
 
 ## hand written functions ##
 source(path(here(), "R", "load_behave_data.R"))
@@ -89,9 +88,87 @@ c25 <- c(
 ```
 
 
+# Anatomical Analyses
+
+To determine if the effects of our above analyses were localized to a specific region of the OFC we used linear mixed-effects modeling. Specifically, we averaged the MNI coordinates of the bipolar-referenced electrodes for each MNI axis. We then tested if the MNI coordinate predicted the test statistic, using a different model for each MNI axis, each with a random effect of subject. We then tested if the MNI coordinate predicted the test statistic, using a different model for each MNI axis, each with a random effect of subject. See the above methods for the definition of the test statistic. We ran these analyses for both the unified and state-dependent encoding analyses first grouped across all predictors, and then separately for each of our main predictors (Self-Offer, Other-Offer, Inequity Type).
+
+In order to refine the regional analysis, we also used the human Brainnetome Atlas (Fan et al., 2016). OFC electrodes were classified into 12 subregions: we included all subregions within the Orbital group of the Brainntome atlas, regions in the Superior and Middle Frontal group that included Broadman area 10, as well as subgenual area 32 from the Cingulate group. Following the approach used by Golan et al. (2016), for each one of our variable of interest (Self-Offer, Other-Offer and Inequity Type in the Unified analyses, and Self-Offer and Other-Offer in the Split analyses), we fitted the log transform of the variable’s test statistic with a one-way mixed-effects model with the fixed factor of Brainnetome region, and the random factors of epoch and patients. Bipolar electrodes were classified according to the Brainnetome location of the first electrode of each pair.
+
 ## Load and Prep Data
 
-```{r load-data}
+```{r load-anat-data}
+# load main localization file #
+localizations <- read_csv(path(here(), "munge", "combined_electrode_info_with_bob.csv"))
+
+# load ST40 file with added Braintomme regions #
+st40_localizations <- read_csv(path(here(), "electrode_coverage", "ST40_Elec_Notes_wAtlases.csv"))
+st40_localizations <- st40_localizations %>%
+  mutate(subject = "ST40") %>%
+  rename(Coordinates = `Coordinates [MNI]`) %>%
+  select(subject, Electrode, Brainnetome, Coordinates) 
+
+# prep correct st40 df #
+st40_orig_localizations <- localizations %>%
+  filter(subject == "ST40") %>%
+  select(-Brainnetome, -Coordinates)
+
+st40_localizations <- left_join(st40_orig_localizations, st40_localizations)
+
+# merge st40 back with other subjects #
+localizations <- localizations %>%
+  filter(subject != "ST40")
+
+localizations_clean <- full_join(localizations, st40_localizations)
+
+# clean braintome names
+localizations_clean <- localizations_clean %>%
+  mutate(Brainnetome = gsub(";", ",", Brainnetome)) %>%
+  mutate(Brainnetome = if_else(Brainnetome == "no_label_found", "no_label_found",
+                              sub(".*?, ", "", gsub(" \\(.*", "", Brainnetome))))
+
+# clean df and prep for merging
+braintome_clean <- localizations_clean %>%
+  select(subject, Electrode, Brainnetome, Coordinates) %>%
+  mutate(Electrode = gsub("POL ", "", Electrode)) %>%
+  mutate(Electrode = gsub(" POL", "", Electrode)) %>%
+  mutate(Electrode = gsub("-Ref", "", Electrode)) %>%
+  mutate(Electrode = gsub("-Ref-", "-", Electrode)) %>%
+  mutate(first_elec = Electrode) %>%
+  mutate(second_elec = Electrode) %>%
+  mutate(first_elec_braint = Brainnetome) %>%
+  mutate(second_elec_braint = Brainnetome) %>%  
+  mutate(first_mni_coord = Coordinates) %>%
+  mutate(second_mni_coord = Coordinates) %>%  
+  select(-Electrode, -Brainnetome, -Coordinates) 
+
+```
+
+
+```{r load-data-unified-and-split-data}
+
+## unified data ##
+unified_hfa_data <- read_csv(path(here(), "results", "single_regressions",
+                                  "compiled_unified_ogpermutation_ofc_results_1_26_2022_anatomy.csv"))
+
+# predictors of interest
+unified_hfa_data <- unified_hfa_data %>% filter(predictor %in% c("self_var_payoff", "other_var_payoff", "trial_type"))
+
+unified_braintome_data <- left_join(unified_hfa_data, braintome_clean %>% select(-second_elec, -second_elec_braint, -second_mni_coord))
+unified_braintome_data <- left_join(unified_braintome_data, braintome_clean %>% select(-first_elec, -first_elec_braint, -first_mni_coord))
+
+# fix coordinates for ST40 from old incorrect recon
+unified_braintome_data <- unified_braintome_data %>%
+  separate(first_mni_coord, into = c("first_mni_x", "first_mni_y", "first_mni_z"), sep = "    ") %>%
+  separate(second_mni_coord, into = c("second_mni_x", "second_mni_y", "second_mni_z"), sep = "    ") %>%
+  mutate_at(.vars = vars("first_mni_x", "first_mni_y", "first_mni_z", 
+                         "second_mni_x", "second_mni_y", "second_mni_z"), .funs = function(x) as.numeric(x)) %>%
+  select(-first_elec_x, -first_elec_y, -first_elec_z)
+
+braintome_elec_id_data <- unified_braintome_data %>%
+  select(subject, electrode, starts_with("first_"), starts_with("second") ) %>%
+  distinct() 
+
+
 
 ## split data ##
 # load permuted regressor results #
@@ -113,14 +190,107 @@ split_ofc_encoding_ttype_df <- split_ofc_encoding_ttype_df %>%
 
 split_ofc_encoding_df <- full_join(split_ofc_encoding_reg_df, split_ofc_encoding_ttype_df)
 
-
-## unified data ##
-unified_hfa_data <- read_csv(path(here(), "results", "single_regressions",
-                                  "compiled_unified_ogpermutation_ofc_results_1_26_2022.csv"))
-
-
+## bind split data iwth braintome data ##
+split_braintome_data <- left_join(split_ofc_encoding_df, braintome_elec_id_data)
 
 ```
+
+
+```{r identify-bad-lables}
+
+
+# ALl ST40 electrodes are on the left except for OF5, OF6
+braintome_bad_rois <- braintome_elec_id_data %>%
+  filter(first_elec_braint %in% c("Left Basal Ganglia dCa, dorsal caudate", "Left Basal Ganglia vCa, ventral caudate",
+                                  "no_label_found", "Right Insular Gyrus dIa, dorsal agranular insula"))
+
+# other not orbinal
+not_orb_only <- unified_braintome_data %>%
+  select(subject, electrode, starts_with("first"), starts_with("second")) %>%
+  distinct() %>%
+  filter(!grepl("Orb", first_elec_braint))
+
+## Unified ##
+
+# manual updating of brantome regions based on expert consultation with nurologist + braintome atlas
+unified_braintome_data <- unified_braintome_data %>%
+  mutate(first_elec_braint = if_else(subject == "IR9" & first_elec == "ROF2", "Right Orbital Gyrus A11l, lateral area 11",
+         if_else(subject == "IR9" & first_elec == "ROF4", "Right Orbital Gyrus A11l, lateral area 11",
+          if_else(subject == "IR9" & first_elec == "ROF5", "no_label_found",
+            if_else(subject == "IR9" & first_elec == "ROF6", "Right Orbital Gyrus A12/47l, lateral area 12/47",
+              if_else(subject == "IR9" & first_elec == "ROF7", "Right Orbital Gyrus A12/47l, lateral area 12/47",
+            if_else(subject == "ST40" & first_elec == "MVF4", "Left Cingulate Gyrus A32sg, subgenual area 32", 
+                if_else(subject == "ST40" & first_elec == "OF1", "Left Orbital Gyrus A11l, lateral area 11", 
+                    if_else(subject == "ST40" & first_elec == "PVF1", "Left Orbital Gyrus A13, area 13",
+                      if_else(subject == "ST40" & first_elec == "PVF2", "Left Orbital Gyrus A13, area 13",
+                        if_else(subject == "ST40" & first_elec == "PVF3", "Left Cingulate Gyrus A32sg, subgenual area 32",
+                          if_else(subject == "ST40" & first_elec == "PVF4", "Left Cingulate Gyrus A32sg, subgenual area 32",
+                              if_else(subject == "IR26" & first_elec == "ROF3", "Right Middle Frontal Gyrus A10l, lateral area10",
+                                  first_elec_braint))))))))))))) %>%
+  mutate(second_elec_braint = if_else(subject == "IR9" & second_elec == "ROF2", "Right Orbital Gyrus A11l, lateral area 11",
+         if_else(subject == "IR9" & second_elec == "ROF4", "Right Orbital Gyrus A11l, lateral area 11",
+           if_else(subject == "IR9" & first_elec == "ROF5", "no_label_found",
+            if_else(subject == "IR9" & first_elec == "ROF6", "Right Orbital Gyrus A12/47l, lateral area 12/47",
+              if_else(subject == "IR9" & first_elec == "ROF7", "Right Orbital Gyrus A12/47l, lateral area 12/47",
+            if_else(subject == "ST40" & second_elec == "MVF4", "Left Cingulate Gyrus A32sg, subgenual area 32", 
+                if_else(subject == "ST40" & second_elec == "OF1", "Left Orbital Gyrus A11l, lateral area 11", 
+                    if_else(subject == "ST40" & second_elec == "PVF1", "Left Orbital Gyrus A13, area 13",
+                      if_else(subject == "ST40" & second_elec == "PVF2", "Left Orbital Gyrus A13, area 13",
+                        if_else(subject == "ST40" & second_elec == "PVF3", "Left Cingulate Gyrus A32sg, subgenual area 32",
+                          if_else(subject == "ST40" & second_elec == "PVF4", "Left Cingulate Gyrus A32sg, subgenual area 32",
+                              if_else(subject == "IR26" & first_elec == "ROF3", "Right Middle Frontal Gyrus A10l, lateral area10",
+                                  second_elec_braint)))))))))))))  %>%
+  # if the 'first_elec_braint' == "no_label_found" it isn't an OFC electrode, after addressing the above exceptions. All other first elecs are OFC
+  mutate(first_elec_braint = replace(first_elec_braint, first_elec_braint == "no_label_found", NA)) %>%
+  mutate(second_elec_braint = replace(second_elec_braint, second_elec_braint == "no_label_found", NA)) %>%
+  # there are no new second electrodes that aren't also first electrodes in the OFC, so the list of the first is the list of OFC regions
+  mutate(second_elec_braint = replace(second_elec_braint, !(second_elec_braint %in% unique(first_elec_braint)), NA))
+  
+# should all be true
+table(unique(unified_braintome_data$second_elec_braint) %in% unique(unified_braintome_data$first_elec_braint))
+
+
+## SPLIT ##
+
+# manual updating of brantome regions based on expert consultation with nurologist + braintome atlas
+split_braintome_data <- split_braintome_data %>%
+  mutate(first_elec_braint = if_else(subject == "IR9" & first_elec == "ROF2", "Right Orbital Gyrus A11l, lateral area 11",
+         if_else(subject == "IR9" & first_elec == "ROF4", "Right Orbital Gyrus A11l, lateral area 11",
+          if_else(subject == "IR9" & first_elec == "ROF5", "no_label_found",
+            if_else(subject == "IR9" & first_elec == "ROF6", "Right Orbital Gyrus A12/47l, lateral area 12/47",
+              if_else(subject == "IR9" & first_elec == "ROF7", "Right Orbital Gyrus A12/47l, lateral area 12/47",
+            if_else(subject == "ST40" & first_elec == "MVF4", "Left Cingulate Gyrus A32sg, subgenual area 32", 
+                if_else(subject == "ST40" & first_elec == "OF1", "Left Orbital Gyrus A11l, lateral area 11", 
+                    if_else(subject == "ST40" & first_elec == "PVF1", "Left Orbital Gyrus A13, area 13",
+                      if_else(subject == "ST40" & first_elec == "PVF2", "Left Orbital Gyrus A13, area 13",
+                        if_else(subject == "ST40" & first_elec == "PVF3", "Left Cingulate Gyrus A32sg, subgenual area 32",
+                          if_else(subject == "ST40" & first_elec == "PVF4", "Left Cingulate Gyrus A32sg, subgenual area 32",
+                              if_else(subject == "IR26" & first_elec == "ROF3", "Right Middle Frontal Gyrus A10l, lateral area10",
+                                  first_elec_braint))))))))))))) %>%
+  mutate(second_elec_braint = if_else(subject == "IR9" & second_elec == "ROF2", "Right Orbital Gyrus A11l, lateral area 11",
+         if_else(subject == "IR9" & second_elec == "ROF4", "Right Orbital Gyrus A11l, lateral area 11",
+           if_else(subject == "IR9" & first_elec == "ROF5", "no_label_found",
+            if_else(subject == "IR9" & first_elec == "ROF6", "Right Orbital Gyrus A12/47l, lateral area 12/47",
+              if_else(subject == "IR9" & first_elec == "ROF7", "Right Orbital Gyrus A12/47l, lateral area 12/47",
+            if_else(subject == "ST40" & second_elec == "MVF4", "Left Cingulate Gyrus A32sg, subgenual area 32", 
+                if_else(subject == "ST40" & second_elec == "OF1", "Left Orbital Gyrus A11l, lateral area 11", 
+                    if_else(subject == "ST40" & second_elec == "PVF1", "Left Orbital Gyrus A13, area 13",
+                      if_else(subject == "ST40" & second_elec == "PVF2", "Left Orbital Gyrus A13, area 13",
+                        if_else(subject == "ST40" & second_elec == "PVF3", "Left Cingulate Gyrus A32sg, subgenual area 32",
+                          if_else(subject == "ST40" & second_elec == "PVF4", "Left Cingulate Gyrus A32sg, subgenual area 32",
+                              if_else(subject == "IR26" & first_elec == "ROF3", "Right Middle Frontal Gyrus A10l, lateral area10",
+                                  second_elec_braint)))))))))))))  %>%
+  # if the 'first_elec_braint' == "no_label_found" it isn't an OFC electrode, after addressing the above exceptions. All other first elecs are OFC
+  mutate(first_elec_braint = replace(first_elec_braint, first_elec_braint == "no_label_found", NA)) %>%
+  mutate(second_elec_braint = replace(second_elec_braint, second_elec_braint == "no_label_found", NA)) %>%
+  # there are no new second electrodes that aren't also first electrodes in the OFC, so the list of the first is the list of OFC regions
+  mutate(second_elec_braint = replace(second_elec_braint, !(second_elec_braint %in% unique(first_elec_braint)), NA))
+  
+# should all be true
+table(unique(split_braintome_data$second_elec_braint) %in% unique(split_braintome_data$first_elec_braint))
+
+```
+
 
 ```{r alternate-hyp-removal}
 
@@ -136,143 +306,138 @@ split_v_uni_max_df <- read_csv(path(here(), "results", "unified_max_split_elecs.
 ```{r prep-dfs}
 
 ## remove noisy, possible unified electrodes ##
-split_ofc_encoding_df <- split_ofc_encoding_df %>%
+split_braintome_data <- split_braintome_data %>%
   mutate(elec_epoch_ids = paste(subject, electrode, epoch, sep = "_")) %>%
   filter(!elec_epoch_ids %in% trial_dep_noise_df$elec_epoch_ids) %>%
   filter(!reg_id %in% split_v_uni_max_df$reg_id)
 
 
 ## split ##
-split_ofc_encoding_data_clean <- split_ofc_encoding_df %>%
+split_braintome_data_clean <- split_braintome_data %>%
   # remove duplicate test statistic
   rename(test_stat_real = test_stat_real_reg) %>%
-  select(reg_id, subject, electrode, predictor, epoch, test_stat_real) %>%
-  distinct() 
+  select(reg_id, subject, electrode, predictor, epoch, test_stat_real, starts_with("first_"), starts_with("second_")) %>%
+  distinct() %>%
+  rowwise() %>%
+  mutate(average_x = mean(first_mni_x, second_mni_x)) %>%
+  mutate(average_y = mean(first_mni_y, second_mni_y)) %>%
+  mutate(average_z = mean(first_mni_z, second_mni_z)) %>%
+  ungroup()
 
 # unified #
-unified_hfa_data_clean <- unified_hfa_data %>%
+unified_braintome_data_clean <- unified_braintome_data %>%
   mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
   mutate(reg_id = paste(subject, electrode, predictor, epoch, sep = "_")) %>%
-  select(reg_id, subject, electrode, predictor, epoch, perm_p, fstretch, bstretch) %>%
-  distinct() 
-
-
-```
-
-
-```{r load-prep-elec-locs}
-
-merge_elec_locations_with_results <- function(df, localizations) {
-## merge df with elec info, stored in localizations
-## creates new var of form ROI1-ROI2  
-## also cleans elec names
-  
-  # only the localization columns we need #
-  localizations <- localizations %>% select(Electrode, subject, `Loc Meeting`, Coordinates)
-  
-  # clean the names
-  df <- df %>%
-    mutate(electrode = gsub("POL ", "", electrode)) %>%
-    mutate(electrode = gsub(" POL", "", electrode)) %>%
-    mutate(electrode = gsub("-Ref", "", electrode)) %>%
-    mutate(electrode = gsub("-Ref-", "-", electrode)) 
-  
-  # separate two electrodes
-  df <- df %>%
-    mutate(first_elec= gsub("-.*", "", electrode)) %>%
-    mutate(second_elec = gsub(".*-", "", electrode))
-  # join on first electrode
-  df <- left_join(df,
-                 localizations,
-                 by = c("subject" = "subject", "first_elec" = "Electrode"))
-  # rename to `first_region`
-  df <- df %>%
-    rename(first_region = `Loc Meeting`, first_coordinates = Coordinates)
-  # join on second electrode and rename
-  df <-  left_join(df,
-             localizations,
-             by = c("subject" = "subject", "second_elec" = "Electrode")) %>%
-    rename(second_region = `Loc Meeting`, second_coordinates = Coordinates)
-  # paste into useful format
-  df <- df %>% mutate(ROI = paste0(first_region, "-", second_region))
-  
-  return(df)
-
-}
-
-# read in data #
-localization_df <- read_csv(path(here(), "munge", "combined_electrode_info_with_bob.csv"))
-coords_st40 <- read_csv(path(here(), "electrode_coverage", "ST40_elec_locs.csv"))
-localization_df <- localization_df %>% filter(subject != "ST40")
-localization_df_st40 <- localization_df %>% filter(subject == "ST40")
-localization_df_st40 <- full_join(coords_st40, localization_df_st40 %>% select(-Coordinates))
-localization_df <- rbind(localization_df, localization_df_st40)
-
-
-# unified #
-unified_hfa_data_clean <- merge_elec_locations_with_results(unified_hfa_data_clean, localization_df)
-unified_hfa_data_clean <- unified_hfa_data_clean %>%
-  mutate(elec_id = paste(subject, "_", electrode)) %>%
-  separate(first_coordinates, into = c("first_x", "first_y", "first_z"), sep = "    ") %>%
-  separate(second_coordinates, into = c("second_x", "second_y", "second_z"), sep = "    ") %>%
-  mutate_at(.vars = vars("first_x", "first_y", "first_z", "second_x", "second_y", "second_z"), .funs = function(x) as.numeric(x)) %>%
+  select(reg_id, subject, electrode, predictor, epoch, perm_p, fstretch, bstretch, starts_with("first_"), starts_with("second_")) %>%
+  distinct() %>%
   rowwise() %>%
-  mutate(average_x = mean(first_x, second_x)) %>%
-  mutate(average_y = mean(first_y, second_y)) %>%
-  mutate(average_z = mean(first_z, second_z)) %>%
+  mutate(average_x = mean(first_mni_x, second_mni_x)) %>%
+  mutate(average_y = mean(first_mni_y, second_mni_y)) %>%
+  mutate(average_z = mean(first_mni_z, second_mni_z)) %>%
   ungroup()
 
-# split #
-split_ofc_encoding_data_clean <- merge_elec_locations_with_results(split_ofc_encoding_data_clean, localization_df)
-split_ofc_encoding_data_clean <- split_ofc_encoding_data_clean %>%
-  mutate(elec_id = paste(subject, "_", electrode)) %>%
-  separate(first_coordinates, into = c("first_x", "first_y", "first_z"), sep = "    ") %>%
-  separate(second_coordinates, into = c("second_x", "second_y", "second_z"), sep = "    ") %>%
-  mutate_at(.vars = vars("first_x", "first_y", "first_z", "second_x", "second_y", "second_z"), .funs = function(x) as.numeric(x)) %>%
-  rowwise() %>%
-  mutate(average_x = mean(first_x, second_x)) %>%
-  mutate(average_y = mean(first_y, second_y)) %>%
-  mutate(average_z = mean(first_z, second_z)) %>%
-  ungroup()
+# combine across hemispheres #
+noHem_unified_braintome_data_clean <- unified_braintome_data_clean %>%
+  mutate(first_elec_braint = gsub("Left ", "", first_elec_braint)) %>%
+  mutate(first_elec_braint = gsub("Right ", "", first_elec_braint)) %>%
+  mutate(second_elec_braint = gsub("Left ", "", second_elec_braint)) %>%
+  mutate(second_elec_braint = gsub("Right ", "", second_elec_braint)) 
+
+noHem_split_braintome_data_clean <- split_braintome_data_clean %>%
+  mutate(first_elec_braint = gsub("Left ", "", first_elec_braint)) %>%
+  mutate(first_elec_braint = gsub("Right ", "", first_elec_braint)) %>%
+  mutate(second_elec_braint = gsub("Left ", "", second_elec_braint)) %>%
+  mutate(second_elec_braint = gsub("Right ", "", second_elec_braint)) 
+
+```
+
+```{r get-bilat-unilat-nums}
+
+laterality_df <- unified_braintome_data_clean %>%
+  ungroup() %>%
+  select(subject, first_elec, first_elec_braint, second_elec, second_elec_braint) %>%
+  distinct() %>%
+  mutate(lat = if_else(grepl("^Left", first_elec_braint), "Left",
+                      if_else(grepl("^Right", first_elec_braint), "Right", "check"))) %>%
+  filter(lat != "check") %>%
+  select(subject, lat) %>%
+  distinct()
+
+
+```
+
+```{r print-regions}
+
+unique(c(noHem_unified_braintome_data_clean$first_elec_braint, noHem_unified_braintome_data_clean$second_elec_braint))
 
 ```
 
 
-## Unified Localization Results
+# Braintome Regression Analysis
+
+## Unified
 
 
-```{r unified-localization-overall}
+```{r unified-afex}
 
-# overall #
 
-overall_electrode_unified_model_x <- lme4::lmer(fstretch ~ average_x +  (1|subject), data = unified_hfa_data_clean)
-overall_electrode_unified_model_y <- lme4::lmer(fstretch ~ average_y +  (1|subject), data = unified_hfa_data_clean)
-overall_electrode_unified_model_z <- lme4::lmer(fstretch ~ average_z +  (1|subject), data = unified_hfa_data_clean)
-summary(overall_electrode_unified_model_x)
-summary(overall_electrode_unified_model_y)
-summary(overall_electrode_unified_model_z)
+unified_model_ttype <- mixed(log(fstretch) ~ first_elec_braint  + (1|subject)+  (1|epoch), 
+                                               data = noHem_unified_braintome_data_clean %>% filter(predictor == "trial_type"))
+unified_model_ttype
+
+unified_model_self <- mixed(log(fstretch) ~ first_elec_braint  +  (1|subject) +  (1|epoch), 
+                                              data = noHem_unified_braintome_data_clean %>% filter(predictor == "self_var_payoff"))
+unified_model_self
+
+unified_model_other <- mixed(log(fstretch) ~ first_elec_braint +  (1|subject) +  (1|epoch), 
+                                               data = noHem_unified_braintome_data_clean %>% filter(predictor == "other_var_payoff"))
+unified_model_other
+
 
 ```
+
+
+## Split
+
+
+```{r split-brainntome-afex}
+
+
+split_model_self <- mixed(log(test_stat_real) ~ first_elec_braint  +  (1|subject) +  (1|epoch), 
+                                              data = noHem_split_braintome_data_clean %>% filter(predictor == "self_var_payoff"))
+split_model_self
+
+split_model_other <- mixed(log(test_stat_real) ~ first_elec_braint  + (1|subject) +  (1|epoch), 
+                                               data = noHem_split_braintome_data_clean %>% filter(predictor == "other_var_payoff"))
+split_model_other
+
+
+```
+
+
+
+
+# Gradient Analyses
+
+##  Unified 
 
 ```{r unified-localization-ttype}
 
 # overall #
-ttype_electrode_unified_model_x <- lme4::lmer(fstretch ~ average_x +  (1|subject), data = unified_hfa_data_clean%>% filter(predictor == 'trial_type'))
-ttype_electrode_unified_model_y <- lme4::lmer(fstretch ~ average_y +  (1|subject), data = unified_hfa_data_clean %>% filter(predictor == 'trial_type'))
-ttype_electrode_unified_model_z <- lme4::lmer(fstretch ~ average_z +  (1|subject), data = unified_hfa_data_clean %>% filter(predictor == 'trial_type'))
+ttype_electrode_unified_model_x <- lmer(fstretch ~  + average_x + (1|subject)  +  (1|epoch), data = noHem_unified_braintome_data_clean %>% filter(predictor == 'trial_type'))
+ttype_electrode_unified_model_y <- lmer(fstretch ~ average_y +  (1|subject) +  (1|epoch), data = noHem_unified_braintome_data_clean %>% filter(predictor == 'trial_type'))
+ttype_electrode_unified_model_z <- lmer(fstretch ~ average_z +  (1|subject)  +  (1|epoch), data = noHem_unified_braintome_data_clean %>% filter(predictor == 'trial_type'))
 summary(ttype_electrode_unified_model_x)
 summary(ttype_electrode_unified_model_y)
 summary(ttype_electrode_unified_model_z)
-effectsize(ttype_electrode_unified_model_z)
-
 ```
 
 ```{r unified-localization-otherv}
 
 # overall #
-otherv_electrode_unified_model_x <- lme4::lmer(fstretch ~ average_x +  (1|subject), data = unified_hfa_data_clean%>% filter(predictor == 'other_var_payoff'))
-otherv_electrode_unified_model_y <- lme4::lmer(fstretch ~ average_y +  (1|subject), data = unified_hfa_data_clean %>% filter(predictor == 'other_var_payoff'))
-otherv_electrode_unified_model_z <- lme4::lmer(fstretch ~ average_z +  (1|subject), data = unified_hfa_data_clean %>% filter(predictor == 'other_var_payoff'))
+otherv_electrode_unified_model_x <- lmer(log(fstretch) ~ average_x +  (1|subject) +  (1|epoch), data = noHem_unified_braintome_data_clean%>% filter(predictor == 'other_var_payoff'))
+otherv_electrode_unified_model_y <- lmer(log(fstretch) ~ average_y +  (1|subject) +  (1|epoch), data = noHem_unified_braintome_data_clean %>% filter(predictor == 'other_var_payoff'))
+otherv_electrode_unified_model_z <- lmer(log(fstretch) ~ average_z +  (1|subject) +  (1|epoch), data = noHem_unified_braintome_data_clean %>% filter(predictor == 'other_var_payoff'))
 summary(otherv_electrode_unified_model_x)
 summary(otherv_electrode_unified_model_y)
 summary(otherv_electrode_unified_model_z)
@@ -282,9 +447,9 @@ summary(otherv_electrode_unified_model_z)
 ```{r unified-localization-selfv}
 
 # overall #
-selfv_electrode_unified_model_x <- lme4::lmer(fstretch ~ average_x +  (1|subject), data = unified_hfa_data_clean%>% filter(predictor == 'self_var_payoff'))
-selfv_electrode_unified_model_y <- lme4::lmer(fstretch ~ average_y +  (1|subject), data = unified_hfa_data_clean %>% filter(predictor == 'self_var_payoff'))
-selfv_electrode_unified_model_z <- lme4::lmer(fstretch ~ average_z +  (1|subject), data = unified_hfa_data_clean %>% filter(predictor == 'self_var_payoff'))
+selfv_electrode_unified_model_x <- lmer(log(fstretch) ~ average_x +  (1|subject) +  (1|epoch), data = noHem_unified_braintome_data_clean%>% filter(predictor == 'self_var_payoff'))
+selfv_electrode_unified_model_y <- lmer(log(fstretch) ~ average_y +  (1|subject) +  (1|epoch), data = noHem_unified_braintome_data_clean %>% filter(predictor == 'self_var_payoff'))
+selfv_electrode_unified_model_z <- lmer(log(fstretch) ~ average_z +  (1|subject) +  (1|epoch), data = noHem_unified_braintome_data_clean %>% filter(predictor == 'self_var_payoff'))
 summary(selfv_electrode_unified_model_x)
 summary(selfv_electrode_unified_model_y)
 summary(selfv_electrode_unified_model_z)
@@ -293,57 +458,14 @@ summary(selfv_electrode_unified_model_z)
 
 ## State Dependent Localization Results
 
-```{r split-localization-overall}
-
-# overall #
-
-overall_electrode_split_model_x <- lme4::lmer(test_stat_real ~ average_x +  (1|subject), data = split_ofc_encoding_data_clean)
-overall_electrode_split_model_y <- rlmer(test_stat_real ~ average_y +  (1|subject), data = split_ofc_encoding_data_clean)
-overall_electrode_split_model_z <- lme4::lmer(test_stat_real ~ average_z +  (1|subject), data = split_ofc_encoding_data_clean)
-summary(overall_electrode_split_model_x)
-summary(overall_electrode_split_model_y)
-summary(overall_electrode_split_model_z)
-
-# further exploration
-effectsize(overall_electrode_split_model_y)
-
-
-# need pvals for reporting #
-n <- 1603
-t <- 2.161
-p_val_y <- 2*pt(-abs(t),df=n-1)
-
-# visual
-
-split_ofc_encoding_data_clean %>%
-  ggplot(., aes(x = average_y, y = log(test_stat_real), color = subject)) +
-  geom_point() +
-  # geom_smooth(method = "lm") +
-  theme(panel.background = element_rect(fill = "white")) +
-  scale_color_viridis(discrete = T)
-
-
-split_ofc_encoding_data_clean %>%
-  ggplot(., aes(x = log(test_stat_real))) +
-  geom_histogram() +
-  theme(panel.background = element_rect(fill = "white")) +
-  scale_color_viridis(discrete = T)
-
-# residuals 
-qqnorm(residuals(overall_electrode_split_model_y))
-
-```
-
-
 ```{r split-localization-otherv}
 
-# overall #
-otherv_electrode_split_model_x <- lme4::lmer(test_stat_real ~ average_x +  (1|subject), 
-                                             data = split_ofc_encoding_data_clean%>% filter(predictor == 'other_var_payoff'))
-otherv_electrode_split_model_y <- lme4::lmer(test_stat_real ~ average_y +  (1|subject), 
-                                             data = split_ofc_encoding_data_clean %>% filter(predictor == 'other_var_payoff'))
-otherv_electrode_split_model_z <- lme4::lmer(test_stat_real ~ average_z +  (1|subject), 
-                                             data = split_ofc_encoding_data_clean %>% filter(predictor == 'other_var_payoff'))
+otherv_electrode_split_model_x <- lmer(log(test_stat_real) ~ average_x +  (1|subject) +  (1|epoch), 
+                                             data = noHem_split_braintome_data_clean %>% filter(predictor == 'other_var_payoff'))
+otherv_electrode_split_model_y <- lmer(log(test_stat_real) ~ average_y +  (1|subject) +  (1|epoch), 
+                                             data = noHem_split_braintome_data_clean  %>% filter(predictor == 'other_var_payoff'))
+otherv_electrode_split_model_z <- lmer(log(test_stat_real) ~ average_z +  (1|subject) +  (1|epoch), 
+                                             data = noHem_split_braintome_data_clean  %>% filter(predictor == 'other_var_payoff'))
 summary(otherv_electrode_split_model_x)
 summary(otherv_electrode_split_model_y)
 summary(otherv_electrode_split_model_z)
@@ -353,68 +475,16 @@ summary(otherv_electrode_split_model_z)
 
 ```{r split-localization-selfv}
 
-# overall #
-selfv_electrode_split_model_x <- lme4::lmer(test_stat_real ~ average_x +  (1|subject), data = split_ofc_encoding_data_clean%>% filter(predictor == 'self_var_payoff'))
-selfv_electrode_split_model_y <- lme4::lmer(test_stat_real ~ average_y +  (1|subject), data = split_ofc_encoding_data_clean %>% filter(predictor == 'self_var_payoff'))
-selfv_electrode_split_model_z <- lme4::lmer(test_stat_real ~ average_z +  (1|subject), data = split_ofc_encoding_data_clean %>% filter(predictor == 'self_var_payoff'))
+
+selfv_electrode_split_model_x <- lmer(log(test_stat_real) ~ average_x +  (1|subject) +  (1|epoch), data = noHem_split_braintome_data_clean%>% filter(predictor == 'self_var_payoff'))
+selfv_electrode_split_model_y <- lmer(log(test_stat_real) ~ average_y +  (1|subject) +  (1|epoch), data = noHem_split_braintome_data_clean %>% filter(predictor == 'self_var_payoff'))
+selfv_electrode_split_model_z <- lmer(log(test_stat_real) ~ average_z +  (1|subject) +  (1|epoch), data = noHem_split_braintome_data_clean %>% filter(predictor == 'self_var_payoff'))
 summary(selfv_electrode_split_model_x)
 summary(selfv_electrode_split_model_y)
 summary(selfv_electrode_split_model_z)
 
 
-# further exploration
-effectsize(selfv_electrode_split_model_y)
-effectsize(selfv_electrode_split_model_z)
 
-# need pvals for reporting #
-n <- 408
-t <- 1.92
-p_val_y <- 2*pt(-abs(t),df=n-1)
-
-n <- 408
-t <- -1.48
-p_val_z <- 2*pt(-abs(t),df=n-1)
-```
-
-
-```{r split-localization-max}
-
-# overall #
-max_electrode_split_model_x <- lme4::lmer(test_stat_real ~ average_x +  (1|subject), 
-                                          data = split_ofc_encoding_data_clean%>% filter(predictor == 'max'))
-max_electrode_split_model_y <- lme4::lmer(test_stat_real ~ average_y +  (1|subject),
-                                            data = split_ofc_encoding_data_clean %>% filter(predictor == 'max'))
-max_electrode_split_model_z <- lme4::lmer(test_stat_real ~ average_z +  (1|subject), 
-                                            data = split_ofc_encoding_data_clean %>% filter(predictor == 'max'))
-summary(max_electrode_split_model_x)
-summary(max_electrode_split_model_y)
-summary(max_electrode_split_model_z)
-
-
-# further exploration
-effectsize(max_electrode_split_model_y)
-effectsize(max_electrode_split_model_z)
-
-```
-
-
-```{r split-localization-min}
-
-# overall #
-min_electrode_split_model_x <- lme4::lmer(test_stat_real ~ average_x +  (1|subject), 
-                                          data = split_ofc_encoding_data_clean%>% filter(predictor == 'min'))
-min_electrode_split_model_y <- lme4::lmer(test_stat_real ~ average_y +  (1|subject),
-                                            data = split_ofc_encoding_data_clean %>% filter(predictor == 'min'))
-min_electrode_split_model_z <- lme4::lmer(test_stat_real ~ average_z +  (1|subject), 
-                                            data = split_ofc_encoding_data_clean %>% filter(predictor == 'min'))
-summary(min_electrode_split_model_x)
-summary(min_electrode_split_model_y)
-summary(min_electrode_split_model_z)
-
-
-# further exploration
-effectsize(min_electrode_split_model_x)
-effectsize(min_electrode_split_model_y)
 
 ```
 

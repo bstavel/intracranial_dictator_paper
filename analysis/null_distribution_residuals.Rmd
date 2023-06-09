@@ -1,6 +1,7 @@
 ---
-title: "Compile Null Dist"
+title: "Null Distribution ~ Residuals"
 output: html_document
+date: '2022-12-01'
 ---
 
 ```{r setup, include=FALSE}
@@ -51,27 +52,10 @@ source(path(here(), "R", "rolling_window_and_baseline.R"))
 source(path(here(), "R", 'mutate_cond.R'))
 source(path(here(), "R", "load_and_collate_reg_results.R"))
 
+# quick necessary function
+comb <- function(x, ...) {  
+      mapply(rbind,x,...,SIMPLIFY=FALSE)}
 
-
-## plotting helpers ##
-# ggthemr("solarized")
-# getPalette = colorRampPalette(brewer.pal(9, "Set1"))
-
-c25 <- c(
-  "dodgerblue2", "#E31A1C", # red
-  "green4",
-  "#6A3D9A", # purple
-  "#FF7F00", # orange
-  "black", "gold1",
-  "skyblue2", "#FB9A99", # lt pink
-  "palegreen2",
-  "#CAB2D6", # lt purple
-  "#FDBF6F", # lt orange
-  "gray70", "khaki2",
-  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
-  "darkturquoise", "green1", "yellow4", "yellow3",
-  "darkorange4", "brown"
-)
 
 # ## parallelization ##
 # nCores <- 4
@@ -83,7 +67,7 @@ c25 <- c(
 ```
 
 
-# Null Distributions
+# Null Distributions (Residuals)
 
 We calculated the full null distributions for both types of permutation in the inequity-dependent analyses. The first type shuffled the regressor within each inequity type. In the second type we shuffled the inequity type labels. As part of sanity checking our work, we did some visualizations of the null distribution to make sure that we did not see the inequity dependent effect within the null distribution (an old version of the analysis involved a clustering approach that was based on a mistake in logic, which I only realized by looking through the null distribution). 
 
@@ -91,17 +75,17 @@ For these reasons, we chose to calculate and save out the null distribution rath
 
 Also requires the output of `compile_split_regression_results.Rmd`
 
-## Prep real data
+## Prep Real Data
 
-```{r load-real-data}
 
+```{r prep-real-data}
 
 # load  split data #
 dis_only_ofc_results <- read_csv(
-  path(here(), "results", "single_regressions", "dis_only_ofc_ogpermutation_single_regressions_1_27_2022.csv"),
+  path(here(), "results", "single_regressions", "dis_only_ofc_residual_ogpermutation_single_regressions_12_1_2022.csv"),
   col_types = cols())
 adv_only_ofc_results <- read_csv(
-  path(here(), "results", "single_regressions", "adv_only_ofc_ogpermutation_single_regressions_1_27_2022.csv"),
+  path(here(), "results", "single_regressions", "adv_only_ofc_residual_ogpermutation_single_regressions_12_1_2022.csv"),
   col_types = cols())
 split_new_results <- rbind(dis_only_ofc_results %>% mutate(state = "Disadvantageous"),
                            adv_only_ofc_results %>% mutate(state = "Advantageous"))
@@ -111,7 +95,7 @@ num_of_elecs <- split_ofc_results %>%
   select(subject, electrode) %>%
   distinct()
 
-write_csv(split_ofc_results, path(here(), "results", "single_regressions", "compiled_ofc_ogpermutation_single_regressions_1_27_2022.csv"))
+write_csv(split_ofc_test_stats, path(here(), "results", "single_regressions", "compiled_ofc_residual_ogpermutation_single_regressions_12_1_2022.csv"))
 
 ```
 
@@ -122,15 +106,16 @@ write_csv(split_ofc_results, path(here(), "results", "single_regressions", "comp
 ```{r load-null-dist-data, eval=FALSE}
 
 ## get all the csvs in the null folder ##
-filenames <- dir(path(here(), "results", "null_average_r2"))
+filenames <- dir(path(here(), "results", "null_resids_average_r2"))
 # separate adv and dis #
 adv_files <- filenames[grepl("*null-average-r2-adv", filenames)]
 dis_files <- filenames[grepl("*null-average-r2-dis", filenames)]
 
 adv_null_results <- NULL
 for(file in adv_files){
-  tmp <- read_csv(path(here(), "results", "null_average_r2", file))
+  tmp <- read_csv(path(here(), "results", "null_resids_average_r2", file))
   tmp$state <- "Advantageous"
+  tmp$freq <- "theta"
   if(grepl("pres-", file)) {
     tmp$epoch <- "presentation"
   } else if(grepl("pre-choice", file)) {
@@ -149,8 +134,9 @@ for(file in adv_files){
 
 dis_null_results <- NULL
 for(file in dis_files){
-  tmp <- read_csv(path(here(), "results", "null_average_r2", file))
+  tmp <- read_csv(path(here(), "results", "null_resids_average_r2", file))
   tmp$state <- "Disadvantageous"
+  tmp$freq <- "theta"
   if(grepl("pres-", file)) {
     tmp$epoch <- "presentation"
   } else if(grepl("pre-choice", file)) {
@@ -169,16 +155,16 @@ for(file in dis_files){
 
 
 complete_null_results <- rbind(dis_null_results, adv_null_results)
-write_csv(complete_null_results, path(here(), "results", "null_average_r2",
-                                      "compiled_null_results_ogpermutation_1_28_22.csv"))
+write_csv(complete_null_results, path(here(), "results", "null_resids_average_r2",
+                                      "compiled_null_resids_results_ogpermutation_1_2_23.csv"))
 ```
 
 ### create new test statistic
 
 ```{r test-stat}
 
-complete_null_results <- read_csv(path(here(), "results", "null_average_r2",
-"compiled_null_results_ogpermutation_1_28_22.csv"))
+complete_null_results <- read_csv(path(here(), "results", "null_resids_average_r2",
+                                       "compiled_null_resids_results_ogpermutation_1_2_23.csv"))
 
 # sort to create permutation index #
 complete_null_results_sorted <- complete_null_results %>%
@@ -235,13 +221,16 @@ null_test_stat_df <- complete_null_results_prepped %>%
   mutate(electrode = gsub("-Ref-", "-", electrode)) %>%
   mutate(reg_id = paste(subject, electrode, predictor, epoch, sep = "_"))
 
+
 ```
 
 ```{r findp-values}
 
-true_ofc_split_results <- read_csv('results/single_regressions/compiled_ofc_ogpermutation_single_regressions_1_27_2022.csv')
+true_ofc_split_results <- read_csv('results/single_regressions/compiled_ofc_residual_ogpermutation_single_regressions_12_1_2022.csv')
 
 split_true_ofc_tstats <- true_ofc_split_results %>%
+  # fix weird parsing issue in this run that occured due to lack of freq in tag
+  mutate(predictor = if_else(grepl("other", predictor), "other_var_payoff", if_else(grepl("self", predictor), "self_var_payoff", "error"))) %>%
   filter(predictor %in% c("self_var_payoff", "other_var_payoff", "max", "min")) %>%
   select(subject, electrode, predictor, epoch, R2, bin, state, ROI) %>%
   mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
@@ -251,9 +240,6 @@ split_true_ofc_tstats <- true_ofc_split_results %>%
   mutate(test_stat_real = abs(sum(Disadvantageous - Advantageous ))) %>%
   mutate(adv_only_test_stat_real = abs(sum(Advantageous))) %>%
   mutate(dis_only_test_stat_real = abs(sum(Disadvantageous)))
-
-  comb <- function(x, ...) {  
-        mapply(rbind,x,...,SIMPLIFY=FALSE)}
 
 pval_permuted <- NULL   
 adv_permuted <- NULL
@@ -298,7 +284,7 @@ pval_permuted_df <- data.frame("permuted_p" = pval_permuted, "adv_pval" = adv_pe
 
 split_true_ofc_tstats_wpvals <- merge.data.frame(split_true_ofc_tstats, pval_permuted_df, by = "reg_id")
 
-write_csv(split_true_ofc_tstats_wpvals, 'results/single_regressions/compiled_ofc_ogpermutation_wpvalues_single_regressions_1_28_2022.csv')
+write_csv(split_true_ofc_tstats_wpvals, 'results/single_regressions/compiled_ofc_resid_ogpermutation_wpvalues_single_regressions_12_1_2022.csv')
 ```
 
 ```{r cut-off-point}
@@ -315,29 +301,33 @@ cutoff_df <- cutoff_df_full %>%
   slice_min(test_stat, n = 1)
 
 
-write_csv(cutoff_df, path(here(), "results", "null_average_r2", "adv_dis_r2_sig_difference_test_stat_12_8_2021.csv"))
+write_csv(cutoff_df, path(here(), "results", "null_resids_average_r2", 
+                          "adv_dis_resid_r2_sig_difference_test_stat_12_1_2022.csv"))
 
-write_csv(cutoff_df_full, path(here(), "results", "null_average_r2", "adv_dis_r2_sig_difference_test_stat_top50_12_8_2021.csv"))
+write_csv(cutoff_df_full, path(here(), "results", "null_resids_average_r2",
+                               "adv_dis_resid_r2_sig_difference_test_stat_top50_12_1_2022.csv"))
 
 
 
 ```
 
 
-## Permute on trial labels
+# Trial Type Permutations
+
+## permute on trial labels
 
 ### compile null distributions
 
 ```{r load-null-ttype-dist-data, eval=FALSE}
 
 ## get all the csvs in the null folder ##
-filenames <- dir(path(here(), "results", "null_average_r2"))
+filenames <- dir(path(here(), "results", "null_resids_ttype"))
 # separate adv and dis #
 ttype_files <- filenames[grepl("*ttype-permute-cperm-hilbertRS", filenames)]
 
 null_ttype_df <- NULL
 for(file in ttype_files){
-  tmp <- read_csv(path(here(), "results", "null_average_r2", file))
+  tmp <- read_csv(path(here(), "results", "null_resids_ttype", file))
   if(grepl("pres-", file)) {
     tmp$epoch <- "presentation"
   } else if(grepl("pre-choice", file)) {
@@ -354,9 +344,11 @@ for(file in ttype_files){
 
 }
 
-write_csv(null_ttype_df, path(here(), "results", "null_average_r2",
-                              "compiled_null_ttype_results_1_28_22.csv"))
+write_csv(null_ttype_df, path(here(), "results", "null_resids_ttype",
+                              "compiled_null_resids_ttype_results_1_2_23.csv"))
 ```
+
+### create new test statistic
 
 ```{r test-stat}
 
@@ -445,7 +437,7 @@ null_ttype_test_stat_df <- null_ttype_df_prepped %>%
 
 ```{r findp-values}
 
-true_ofc_split_results <- read_csv('results/single_regressions/compiled_ofc_ogpermutation_single_regressions_1_27_2022.csv')
+true_ofc_split_results <- read_csv('results/single_regressions/compiled_ofc_residual_ogpermutation_single_regressions_12_1_2022.csv')
 
 split_true_ofc_tstats <- true_ofc_split_results %>%
   # fix weird parsing issue in this run that occured due to lack of freq in tag
@@ -498,7 +490,7 @@ pval_permuted_df <- data.frame("permuted_p" = pval_permuted, "reg_id" = names(pv
 
 split_true_ofc_tstats_wpvals <- merge.data.frame(split_true_ofc_tstats, pval_permuted_df, by = "reg_id")
 
-write_csv(split_true_ofc_tstats_wpvals, 'results/single_regressions/compiled_ofc_ogpermutation_ttype_wpvalues_single_regressions_12_1_2022.csv')
+write_csv(split_true_ofc_tstats_wpvals, 'results/single_regressions/compiled_ofc_resids_ogpermutation_ttype_wpvalues_single_regressions_12_1_2022.csv')
 ```
 
 ```{r cut-off-point}
@@ -517,13 +509,14 @@ cutoff_ttype_df <- cutoff_ttype_full %>%
 
 
 
-write_csv(cutoff_ttype_df, path(here(), "results", "null_average_r2",
-                                "ttype_difference_test_stat_12_8_2021.csv"))
+write_csv(cutoff_ttype_df, path(here(), "results", "null_resids_ttype",
+                                "ttype_difference_resids_test_stat_12_1_2022.csv"))
 
-write_csv(cutoff_ttype_full, path(here(), "results", "null_average_r2",
-                                "ttype_difference_test_stat_top_50_12_8_2021.csv"))
+write_csv(cutoff_ttype_full, path(here(), "results", "null_resids_ttype",
+                                "ttype_difference_resids_test_stat_top_50_12_1_2022.csv"))
 ```
 
+Stopped here at neuro conference
 
 ### comparison of trial type and regressor permuting
 
@@ -548,7 +541,7 @@ fals_pos_df <- cutoff_compare_full %>%
   pivot_wider(names_from = permutation_type, values_from =  c(cutt_off, test_stat))
 
 
-write_csv(fals_pos_df, path(here(), "results", "null_average_r2", "p_val_lookup_df_new.csv"))
+write_csv(fals_pos_df, path(here(), "results", "null_average_r2", "p_val_lookup_theta_df_new.csv"))
 
 
 ## look at distributions
@@ -574,3 +567,316 @@ cutoff_compare_df %>%
 ```
 
 
+
+
+### EDA
+
+```{r eda-ofg51}
+
+null_test_stat_df <- complete_null_results_prepped %>%
+  select(-X1) %>%
+  mutate(permute_id = paste(subject, electrode, predictor, epoch, permutation, sep = "_")) %>%
+  group_by(permute_id) %>%
+  pivot_wider(names_from = state, values_from = c(R2, Beta, p))
+
+
+null_test_stat_df <- null_test_stat_df %>%
+  mutate(test_stat = sum(abs(R2_Disadvantageous - R2_Advantageous )))
+
+tmp_ofg51_null <- null_test_stat_df %>%
+  filter(subject == "GP51" & electrode == "OFG51" & predictor == "other_var_payoff" & epoch == "presentation") %>%
+  filter(test_stat > 0.6175786) %>%
+  select(bin, permute_id, permutation, Beta_Advantageous, Beta_Disadvantageous) %>%
+  pivot_longer(cols = starts_with("Beta_"), names_to = "State", values_to = "Beta")
+
+tmp_ofg51_null %>%
+  # pivot_longer(cols = c(Disadvantageous, Advantageous), names_to = "state", values_to = "R2") %>%
+  mutate(time = 50 * as.numeric(gsub("bin_", "", bin))) %>%
+  ggplot(., aes(x = time, y = Beta, color = State)) +
+  geom_point() +
+  geom_line() +
+  ylim(-.02, .02) +
+  theme(panel.background = element_rect(fill = "white")) +
+  facet_wrap(~permutation)
+
+```
+
+
+
+##  EDA from earlier versions
+
+
+```{r quick-vis}
+
+complete_null_results_sorted <- complete_null_results %>%
+  arrange(subject, electrode, epoch, predictor, state)
+
+complete_null_results_sorted_post <- complete_null_results_sorted %>%
+  filter(predictor %in% c("max", "min", "other_var_payoff", "self_var_payoff")) %>%
+  filter(epoch == 'post-choice') %>%
+  mutate(elec_ids = paste(subject, electrode, predictor, epoch, sep = "_")) %>%
+  group_by(elec_ids, state) %>%
+  mutate(permutation = unlist(lapply(1:1000, FUN = function(x) rep(x, 20))))
+
+complete_null_results_sorted_pre <- complete_null_results_sorted %>%
+  filter(predictor %in% c("max", "min", "other_var_payoff", "self_var_payoff")) %>%
+  filter(epoch == 'pre-choice') %>%
+  mutate(elec_ids = paste(subject, electrode, predictor, epoch, sep = "_")) %>%
+  group_by(elec_ids, state) %>%
+  mutate(permutation = unlist(lapply(1:1000, FUN = function(x) rep(x, 13))))
+
+complete_null_results_sorted_pres <- complete_null_results_sorted %>%
+  filter(predictor %in% c("max", "min", "other_var_payoff", "self_var_payoff")) %>%
+  filter(epoch == 'presentation') %>%
+  mutate(elec_ids = paste(subject, electrode, predictor, epoch, sep = "_")) %>%
+  group_by(elec_ids, state) %>%
+  mutate(permutation = unlist(lapply(1:1000, FUN = function(x) rep(x, 15))))
+
+complete_null_results_prepped <- rbind(complete_null_results_sorted_pres,
+                                       complete_null_results_sorted_pre,
+                                       complete_null_results_sorted_post)
+
+null_r2_df <- complete_null_results_prepped %>%
+    filter(predictor %in% c("max")) %>%
+    group_by(elec_ids, state, permutation) %>%
+    filter(p < 0.05) %>%
+    mutate(dummy = 50) %>%
+    mutate(encode_duration = sum(dummy)) %>%
+    mutate(average_r2 = encode_duration * mean(R2))
+
+null_r2_df_wide <- null_r2_df %>%
+    select(average_r2, bin, state, elec_ids) %>%
+    distinct() %>%
+    ungroup() %>%
+    pivot_wider(names_from = state, values_from = average_r2, values_fill = 0) %>%
+    select(elec_ids, bin, Advantageous, Disadvantageous)
+
+null_plot <- null_r2_df_wide %>%
+  ggplot(., aes(x = Advantageous, y = Disadvantageous,)) +
+  geom_point(size = 1, alpha = .3, color = 'grey') +
+  theme(panel.background = element_rect(fill = "white")) +
+  ggtitle('null dist')
+
+null_r2_df_wide %>%
+  ggplot(., aes(x = Advantageous, y = Disadvantageous,)) +
+  geom_point(size = 1, alpha = .01, color = 'grey') +
+  geom_jitter(data = all_r2_cluster_df,
+              aes(x = Advantageous, y = Disadvantageous), size = 2, color = '#9B59B6') +
+  theme(panel.background = element_rect(fill = "white")) +
+  ggtitle('null dist + real average encoding')
+
+```
+
+```{r individual-r2-plots}
+
+example_elec <- split_ofc_results %>%
+  filter(subject == "GP51" & electrode == "OFG2" & predictor == "other_var_payoff" & epoch == "presentation") %>%
+  mutate(time = 50 * as.numeric(gsub("bin_", "", bin))) %>%
+  select(time, R2, state)
+
+example_elec %>%
+  ggplot(., aes(x = time, y = R2, color = state)) +
+  geom_point(alpha = 1) +
+  geom_line(alpha = 1) +
+  ylim(0, .1) +
+  theme(panel.background = element_rect(fill = "white"))
+
+null_examples <- complete_null_results_prepped %>%
+  filter(subject == "GP51" & electrode == "OFG2" & predictor == "other_var_payoff" & epoch == "presentation") %>%
+  mutate(time = 50 * as.numeric(gsub("bin_", "", bin))) %>%
+  select(time, R2, state, permutation, elec_ids)
+
+null_examples %>%
+  filter(permutation %in% sample(1:1000, 1)) %>%
+  ggplot(., aes(x = time, y = R2, color = state, group = permutation)) +
+  geom_point(alpha = 1) +
+  geom_line(alpha = 1) +
+  ylim(0, .1) +
+  theme(panel.background = element_rect(fill = "white"))
+
+```
+
+```{r sample-vec-cors}
+
+reg_vec <- behave_data_GP51 %>%
+  # filter(trial_type == "Disadvantageous") %>%
+  filter(trial_type != "equality") %>%
+  pull("other_var_payoff")
+
+null_mat <- as.matrix(sapply(1:1000, function(x) sample(reg_vec)))
+null_cor_full <- cor(null_mat)
+# null_cor <- cor(null_mat)
+
+mean(null_cor)
+sd(null_cor)
+
+
+mean(null_cor_full)
+sd(null_cor_full)
+
+```
+
+
+
+
+```{r thresholding}
+
+null_examples %>%
+  group_by(permutation) %>%
+  mutate(better_than_real = sum(R2 > 0.075)) %>%
+  select(permutation, elec_ids, state, better_than_real) %>%
+  distinct() %>%
+  ggplot(aes(x = better_than_real)) +
+  geom_histogram(binwidth = 1) +
+  theme(panel.background = element_rect(fill = "white"))
+
+
+tmp <- null_examples %>%
+  group_by(permutation) %>%
+  mutate(better_than_real = sum(R2 > 0.05)) %>%
+  select(permutation, elec_ids, state, better_than_real) %>%
+  distinct()
+
+
+
+table(tmp$better_than_real >3)
+
+```
+
+
+
+
+
+```{r chi-square-tests}
+
+split_ofc_table <- split_ofc_results %>%
+  filter(predictor %in% c("max", "min", "self_var_payoff", "other_var_payoff")) %>%
+  mutate(elec_ids = paste(subject, electrode, predictor, epoch, sep = "_")) %>%
+  group_by(elec_ids, state) %>%
+  mutate(average_r2 = mean(R2)) %>%
+  select(average_r2, state, elec_ids) %>%
+  ungroup() %>%
+  mutate(discrete_cut = if_else(average_r2 > .024, 1, 0)) %>%
+  select(-average_r2) %>%
+  distinct() %>%
+  pivot_wider(names_from = state, values_from = discrete_cut)
+
+complete_null_table <- complete_null_results %>%
+  mutate(discrete_cut = if_else(Average_R2 > .024, 1, 0)) %>%
+  mutate(perm_ids = paste(subject, electrode, predictor, epoch, X1, sep = "_")) %>%
+  select(perm_ids, state, discrete_cut) %>%
+  pivot_wider(names_from = state, values_from = discrete_cut) %>%
+  mutate(upper_triangle = if_else(Advantageous +  Disadvantageous == 2, 1, 0))
+
+total_null <- dim(complete_null_table)[1]
+total_real <- dim(split_ofc_table)[1]
+
+
+null_table <- table(complete_null_table$Disadvantageous, complete_null_table$Advantageous,
+                    dnn = c("Dis.", "Adv."))
+real_table <- table(split_ofc_table$Disadvantageous, split_ofc_table$Advantageous,
+                    dnn = c("Dis.", "Adv."))
+
+null_table/total_null * 135 * 12
+real_table/total_real * 135 * 12
+
+
+chisq.test(null_table, real_table)
+
+table(complete_null_table$Disadvantageous)
+table(complete_null_table$Advantageous)
+```
+
+
+```{r correlations}
+
+real_correlations_df <- split_ofc_results %>%
+      filter(predictor %in% c("max", "min", "other_var_payoff", "self_var_payoff")) %>%
+      filter(p < 0.05) %>%
+      mutate(elec_ids = paste(subject, electrode, predictor, epoch, sep = "_")) %>%
+      group_by(elec_ids, state) %>%
+      mutate(average_r2 = mean(R2)) %>%
+      select(average_r2, state, elec_ids, subject, electrode, predictor, epoch) %>%
+      distinct() %>%
+      ungroup() %>%
+      pivot_wider(names_from = state, values_from = average_r2) %>%
+      select(elec_ids, subject, electrode, predictor, epoch, Advantageous, Disadvantageous) %>%
+      mutate(diff = (Advantageous - Disadvantageous)  )
+
+null_correlations_df <- complete_null_results_wide %>%
+      mutate(diff = (Advantageous - Disadvantageous) )
+
+real_cor <- cor.test(real_correlations_df$Disadvantageous, real_correlations_df$Advantageous)
+
+null_cor <- cor.test(null_correlations_df$Disadvantageous, null_correlations_df$Advantageous)
+
+null_correlations_df <- null_correlations_df %>%
+  filter(Advantageous > .01 | Disadvantageous > 0.01)
+
+real_correlations_df <- real_correlations_df %>%
+  filter(Advantageous > .01 | Disadvantageous > 0.01)
+
+null_correlations_df %>%
+  ggplot(., aes(x =diff, y = stat(density*width))) +
+  geom_histogram(binwidth = .001, alpha = .5) +
+  geom_histogram(data = real_correlations_df, aes(x = diff, y = stat(density*width)),
+                 binwidth = .001, fill = 'red', alpha = .5) +
+  xlim(-.2, .2) +
+  theme(panel.background = element_rect(fill = "white"))
+
+```
+
+
+```{r other-var-chi-tables}
+
+complete_null_table_otherv <- complete_null_table %>%
+  filter(grepl("other_var_payoff", perm_ids))
+
+split_ofc_table_otherv <- split_ofc_table %>%
+  filter(grepl("other_var_payoff", elec_ids))
+
+total_null <- dim(complete_null_table_otherv)[1]
+total_real <- dim(split_ofc_table_otherv)[1]
+
+
+null_table_otherv <- table(complete_null_table_otherv$Disadvantageous,
+                           complete_null_table_otherv$Advantageous, dnn = c("Dis.", "Adv."))
+real_table_otherv <- table(split_ofc_table_otherv$Disadvantageous,
+                           split_ofc_table_otherv$Advantageous, dnn = c("Dis.", "Adv."))
+
+null_table_otherv/total_null * 100
+real_table_otherv/total_real * 100
+
+
+```
+
+
+```{r samples}
+
+complete_null_results %>%
+  filter(X1 %in% sample(X1, 200)) %>%
+  pivot_wider(names_from = context_state, values_from = Average_R2) %>%
+  ggplot(., aes(y = Advantageous, x = Disadvantageous)) +
+  geom_point(alpha = .5) +
+  # geom_hline(yintercept = .035, color = 'black') +
+  # geom_vline(xintercept = .035, color = 'black') +
+  theme(panel.background = element_rect(fill = "white"))
+
+```
+
+
+```{r 2dhist}
+
+
+complete_null_results %>%
+  # filter(X1 %in% sample(X1, 200)) %>%
+  pivot_wider(names_from = state, values_from = Average_R2) %>%
+  ggplot(., aes(y = Advantageous, x = Disadvantageous)) +
+  geom_bin2d(bins = 200) +
+  # geom_hline(yintercept = .035, color = 'black') +
+  # geom_vline(xintercept = .035, color = 'black') +
+  theme(panel.background = element_rect(fill = "white")) +
+  scale_fill_viridis_c()
+
+
+```

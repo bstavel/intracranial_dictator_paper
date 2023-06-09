@@ -40,7 +40,6 @@ library(viridis)
 library(lmtest)
 library(gt)
 library(ggalluvial)
-library(parameters)
 library(factoextra)
 library(NbClust)
 
@@ -86,6 +85,11 @@ c25 <- c(
 
 #find . -type f -mtime +10 -maxdepth 1 -exec mv {} before_3-21-21 \;
 ```
+
+
+## Brain Figure Prep
+
+Plotting helpers to plot the inequity dependent effects on the brain
 
 
 ```{r load-data}
@@ -224,10 +228,10 @@ for(sub in unique(both_var_results$subject)){
 }
 
 ### left ###
-left_ofc_elecs <- both_var_results %>% # ST40's OFG grid is on the left
-  filter( (grepl("^AVF", electrode) | grepl("^MVF", electrode) | grepl("^FG", electrode) | grepl("^PVF", electrode) & subject == "ST40") |
-            subject != "ST40" & subject != "GP51") %>%
-  filter(subject %in% c("ST40") | (subject != "IR28" & grepl("^L", electrode)) | (subject == "IR28" & grepl("^R", electrode)))
+left_ofc_elecs <- both_var_results %>% # ST40's OFG grid is on the left, otherwise the anatomy script figures it out by electrode names
+  filter( (grepl("^AVF", electrode) | grepl("^MVF", electrode) | grepl("^FG", electrode) | grepl("^PVF", electrode) & subject == "ST40") | 
+            (electrode %in% c("OF1", "OF2", "OF3") & subject == "ST40") | (subject != "ST40" & subject != "GP51")) %>%
+  filter(subject %in% c("ST40") | grepl("^L", electrode) )
 
 write_csv(left_ofc_elecs, path(here(), "figures", "anat_values", "ofc_electrodes_both_var_clusters_left.csv"))
 
@@ -241,9 +245,9 @@ for(sub in unique(left_ofc_elecs$subject)){
 
 
 ### right ###
-right_ofc_elecs <- both_var_results %>% # GP51's OFG grid is on the right
- filter( (grepl("^OFG", electrode) & subject == "GP51") |   subject != "GP51") %>%
- filter(subject %in% c("GP51") | (subject != "IR28" & grepl("^R", electrode)) | (subject == "IR28" & grepl("^L", electrode)))
+right_ofc_elecs <- both_var_results %>% # GP51's OFG grid is on the right, , otherwise the anatomy script figures it out by electrode names
+ filter( (grepl("^OFG", electrode) & subject == "GP51") | (electrode %in% c("OF4", "OF5") & subject == "ST40") |  subject != "GP51") %>%
+ filter(subject %in% c("GP51") | grepl("^R", electrode))
     
 
 write_csv(right_ofc_elecs, path(here(), "figures", "anat_values", "ofc_electrodes_both_var_clusters_right.csv"))
@@ -300,10 +304,10 @@ for(sub in unique(both_var_results$subject)){
 }
 
 ### left ###
-left_ofc_elecs <- both_var_results %>% # ST40's OFG grid is on the left
-  filter( (grepl("^AVF", electrode) | grepl("^MVF", electrode) | grepl("^FG", electrode) | grepl("^PVF", electrode) & subject == "ST40") |
-            subject != "ST40" & subject != "GP51") %>%
-  filter(subject %in% c("ST40") | (subject != "IR28" & grepl("^L", electrode)) | (subject == "IR28" & grepl("^R", electrode)))
+left_ofc_elecs <- both_var_results %>% # ST40's OFG grid is on the left, otherwise the anatomy script figures it out by electrode names
+  filter( (grepl("^AVF", electrode) | grepl("^MVF", electrode) | grepl("^FG", electrode) | grepl("^PVF", electrode) & subject == "ST40") | 
+            (electrode %in% c("OF1", "OF2", "OF3") & subject == "ST40") | (subject != "ST40" & subject != "GP51")) %>%
+  filter(subject %in% c("ST40") | grepl("^L", electrode) )
 
 write_csv(left_ofc_elecs, path(here(), "figures", "anat_values", "ofc_electrodes_both_var_clusters_prec_left.csv"))
 
@@ -317,9 +321,9 @@ for(sub in unique(left_ofc_elecs$subject)){
 
 
 ### right ###
-right_ofc_elecs <- both_var_results %>% # GP51's OFG grid is on the right
- filter( (grepl("^OFG", electrode) & subject == "GP51") |   subject != "GP51") %>%
- filter(subject %in% c("GP51") | (subject != "IR28" & grepl("^R", electrode)) | (subject == "IR28" & grepl("^L", electrode)))
+right_ofc_elecs <- both_var_results %>% # GP51's OFG grid is on the right, , otherwise the anatomy script figures it out by electrode names
+ filter( (grepl("^OFG", electrode) & subject == "GP51") | (electrode %in% c("OF4", "OF5") & subject == "ST40") |  subject != "GP51") %>%
+ filter(subject %in% c("GP51") | grepl("^R", electrode))
     
 
 write_csv(right_ofc_elecs, path(here(), "figures", "anat_values", "ofc_electrodes_both_var_clusters_prec_right.csv"))
@@ -374,10 +378,10 @@ for(sub in unique(both_var_results$subject)){
 }
 
 ### left ###
-left_ofc_elecs <- both_var_results %>% # ST40's OFG grid is on the left
-  filter( (grepl("^AVF", electrode) | grepl("^MVF", electrode) | grepl("^FG", electrode) | grepl("^PVF", electrode) & subject == "ST40") |
-            subject != "ST40" & subject != "GP51") %>%
-  filter(subject %in% c("ST40") | (subject != "IR28" & grepl("^L", electrode)) | (subject == "IR28" & grepl("^R", electrode)))
+left_ofc_elecs <- both_var_results %>% # ST40's OFG grid is on the left, otherwise the anatomy script figures it out by electrode names
+  filter( (grepl("^AVF", electrode) | grepl("^MVF", electrode) | grepl("^FG", electrode) | grepl("^PVF", electrode) & subject == "ST40") | 
+            (electrode %in% c("OF1", "OF2", "OF3") & subject == "ST40") | (subject != "ST40" & subject != "GP51")) %>%
+  filter(subject %in% c("ST40") | grepl("^L", electrode) )
 
 write_csv(left_ofc_elecs, path(here(), "figures", "anat_values", "ofc_electrodes_both_var_clusters_pres_left.csv"))
 
@@ -391,9 +395,9 @@ for(sub in unique(left_ofc_elecs$subject)){
 
 
 ### right ###
-right_ofc_elecs <- both_var_results %>% # GP51's OFG grid is on the right
- filter( (grepl("^OFG", electrode) & subject == "GP51") |   subject != "GP51") %>%
- filter(subject %in% c("GP51") | (subject != "IR28" & grepl("^R", electrode)) | (subject == "IR28" & grepl("^L", electrode)))
+right_ofc_elecs <- both_var_results %>% # GP51's OFG grid is on the right, , otherwise the anatomy script figures it out by electrode names
+ filter( (grepl("^OFG", electrode) & subject == "GP51") | (electrode %in% c("OF4", "OF5") & subject == "ST40") |  subject != "GP51") %>%
+ filter(subject %in% c("GP51") | grepl("^R", electrode))
     
 
 write_csv(right_ofc_elecs, path(here(), "figures", "anat_values", "ofc_electrodes_both_var_clusters_pres_right.csv"))

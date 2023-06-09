@@ -34,7 +34,7 @@ niter <- 1000
 ## subs to run ##
 subs <- c("IR9", "IR16", "IR19", "IR26", "IR28", "IR35", "IR57", "IR39", "GP51", "DA9", "ST40")
 ## frequencies to run ##
-freqs <- c("hfa")
+freqs <- c("theta")
 
 for(freq in freqs){
 

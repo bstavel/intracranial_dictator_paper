@@ -1,0 +1,187 @@
+---
+title: "Split Residual Analysis"
+output: html_document
+date: '2022-12-02'
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo <- FALSE,  # don't print the code chunk
+  warning <- FALSE,  # don't print warnings
+  message <- FALSE,  # don't print messages
+  fig.width <- 5,  # set default width of figures
+  fig.height <- 8,  # set default height of figures
+  fig.align <- "center",  # always align figure in center
+  fig.pos <- "H",  # always plot figure at the exact location of the code chunk
+  cache <- FALSE)  # cache results
+
+## libraries ##
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+# library(summarytools)
+library(ggthemr)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(wesanderson)
+library(ggsci)
+library(zoo)
+library(kableExtra)
+library(lme4)
+library(RColorBrewer)
+library(doParallel)
+library(parallel)
+library(foreach)
+library(here)
+library(fs)
+library(ggcorrplot)
+library(viridis)
+library(lmtest)
+library(gt)
+library(ggalluvial)
+# library(parameters)
+library(factoextra)
+library(NbClust)
+library(ggsankey)
+
+## hand written functions ##
+source(path(here(), "R", "load_behave_data.R"))
+source(path(here(), "R", "prep_behave_data.R"))
+source(path(here(), "R", "stretch_start_end.R"))
+source(path(here(), "R", "load_high_gamma_data.R"))
+source(path(here(), "R", "rolling_window_and_baseline.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+# source('~/Projects/nice_r_functions/ggpaired_pretty.R')
+source(path(here(), "R", 'mutate_cond.R'))
+source(path(here(), "R", "load_and_collate_reg_results.R"))
+
+
+
+## plotting helpers ##
+ggthemr("solarized")
+getPalette = colorRampPalette(brewer.pal(9, "Set1"))
+
+c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+
+# ## parallelization ##
+# nCores <- 4
+# registerDoParallel(nCores)
+# 
+
+
+#find . -type f -mtime +10 -maxdepth 1 -exec mv {} before_3-21-21 \;
+```
+
+# Inequity Dependent ("split") Analyses (Residual Analyses)
+
+This notebook takes the compiled results from the permutated regressions, does FDR correction, as a control analysis for the main inequity dependent analyses. Results in supplemental table 3. 
+
+
+```{r load-data}
+# load permuted regressor results #
+split_ofc_encoding_reg_df <- read_csv(path(here(), "results", "single_regressions",
+                                       "compiled_ofc_resid_ogpermutation_wpvalues_single_regressions_12_1_2022.csv"))
+
+# load permuted trial results #
+split_ofc_encoding_ttype_df <- read_csv(path(here(), "results", "single_regressions",
+                                       "compiled_ofc_resids_ogpermutation_ttype_wpvalues_single_regressions_12_1_2022.csv"))
+
+# rename test stats and combine #
+split_ofc_encoding_reg_df <- split_ofc_encoding_reg_df %>%
+  rename(test_stat_real_reg = test_stat_real) %>%
+  rename(permuted_p_reg = permuted_p)
+
+split_ofc_encoding_ttype_df <- split_ofc_encoding_ttype_df %>%
+  rename(test_stat_real_ttype = test_stat_real) %>%
+  rename(permuted_p_ttype = permuted_p)
+
+split_ofc_encoding_df <- full_join(split_ofc_encoding_reg_df, split_ofc_encoding_ttype_df)
+
+
+```
+
+```{r alternate-hyp-removal, eval = F}
+
+## electrodes with differences in noise between trial types ##
+trial_dep_noise_df <- read_csv(path(here(), "results", "trial_dep_differences_noise.csv"))
+
+
+## electrodes better explained by max/min unified encoding ##
+split_v_uni_max_df <- read_csv(path(here(), "results", "unified_max_split_elecs.csv"))
+
+```
+
+```{r prep-dfs}
+
+# fdr correctyed df 
+split_ofc_encoding_df_fdr <- split_ofc_encoding_df %>%
+  select(reg_id, subject, electrode, predictor, epoch, permuted_p_reg, permuted_p_ttype) %>%
+  distinct() %>%
+  group_by(epoch, predictor) %>%
+  mutate(perm_p_reg_fdr = p.adjust(permuted_p_reg, method = "fdr")) %>%
+  mutate(perm_p_ttype_fdr = p.adjust(permuted_p_ttype, method = "fdr"))
+
+
+scatter_plot_r2_df <- split_ofc_encoding_df %>%
+  group_by(reg_id) %>%
+  mutate(mean_adv = mean(Advantageous)) %>%
+  mutate(mean_dis = mean(Disadvantageous)) %>%
+  select(mean_adv, mean_dis, reg_id) %>%
+  distinct() 
+
+scatter_plot_r2_fdr_df <- left_join(scatter_plot_r2_df, split_ofc_encoding_df_fdr)
+
+
+scatter_plot_r2_fdr_df <- scatter_plot_r2_fdr_df %>%
+  mutate(sig = if_else(mean_dis > mean_adv & perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05, "Disadvantageous", 
+                       if_else(mean_adv >= mean_dis & perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05, "Advantageous", "Not Sig.")))
+
+```
+
+
+```{r table}
+
+# Supplemental Table 4 #
+
+split_hfa_fdr_sig_table <- split_ofc_encoding_df_fdr %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  filter(perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05) %>%
+  select(subject, elec_id, predictor, epoch) %>%
+  distinct() %>%
+  group_by(predictor, epoch) %>%
+  mutate(sig_count_per_epoch =  length(unique(elec_id))) %>%
+  mutate(percent_of_elecs_per_epoch = (sig_count_per_epoch/ 136) * 100) %>%
+  group_by(predictor) %>%
+  mutate(sig_count = length(unique(elec_id))) %>%
+  mutate(percent_of_elecs = (sig_count/ 136) * 100) %>%
+  mutate(unique_subs = length(unique(subject))) %>%
+  select(predictor, epoch, sig_count_per_epoch, percent_of_elecs_per_epoch, sig_count, 
+         unique_subs, percent_of_elecs) %>%
+  distinct() %>%
+  mutate(percent_of_elecs_per_epoch = round(percent_of_elecs_per_epoch, 2)) %>%
+  mutate(percent_of_elecs = round(percent_of_elecs, 2)) %>%
+  arrange(desc(predictor), desc(epoch))  %>%
+  mutate(predictor = if_else(predictor == "self_var_payoff", "Self-Offer",
+                                     if_else(predictor == "other_var_payoff", "Other-Offer",
+                                             if_else(predictor == "max", "Max", "Min"))))
+
+
+```
+

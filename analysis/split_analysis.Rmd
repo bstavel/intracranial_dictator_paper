@@ -1,0 +1,540 @@
+---
+title: "Inequity Dependent Encoding"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo <- FALSE,  # don't print the code chunk
+  warning <- FALSE,  # don't print warnings
+  message <- FALSE,  # don't print messages
+  fig.width <- 5,  # set default width of figures
+  fig.height <- 8,  # set default height of figures
+  fig.align <- "center",  # always align figure in center
+  fig.pos <- "H",  # always plot figure at the exact location of the code chunk
+  cache <- FALSE)  # cache results
+
+## libraries ##
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+# library(summarytools)
+library(ggthemr)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(wesanderson)
+library(ggsci)
+library(zoo)
+library(kableExtra)
+library(lme4)
+library(RColorBrewer)
+library(doParallel)
+library(parallel)
+library(foreach)
+library(here)
+library(fs)
+library(ggcorrplot)
+library(viridis)
+library(lmtest)
+library(gt)
+library(ggalluvial)
+library(factoextra)
+library(NbClust)
+library(ggsankey)
+
+## hand written functions ##
+source(path(here(), "R", "load_behave_data.R"))
+source(path(here(), "R", "prep_behave_data.R"))
+source(path(here(), "R", "stretch_start_end.R"))
+source(path(here(), "R", "load_high_gamma_data.R"))
+source(path(here(), "R", "rolling_window_and_baseline.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+# source('~/Projects/nice_r_functions/ggpaired_pretty.R')
+source(path(here(), "R", 'mutate_cond.R'))
+source(path(here(), "R", "load_and_collate_reg_results.R"))
+
+
+
+## plotting helpers ##
+ggthemr("solarized")
+getPalette = colorRampPalette(brewer.pal(9, "Set1"))
+
+c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+
+# ## parallelization ##
+# nCores <- 4
+# registerDoParallel(nCores)
+# 
+
+
+#find . -type f -mtime +10 -maxdepth 1 -exec mv {} before_3-21-21 \;
+```
+
+# Inequity Dependent ("split") Analyses
+
+This notebook takes the compiled results from the permutated regressions, does FDR correction, creates the supplementary tables and the components for Figure 3 of the main text. 
+
+
+```{r load-data}
+# load permuted regressor results #
+split_ofc_encoding_reg_df <- read_csv(path(here(), "results", "single_regressions",
+                                       "compiled_ofc_ogpermutation_wpvalues_single_regressions_1_28_2022.csv"))
+
+# load permuted trial results #
+split_ofc_encoding_ttype_df <- read_csv(path(here(), "results", "single_regressions",
+                                       "compiled_ofc_ogpermutation_ttype_wpvalues_single_regressions_1_28_2022.csv"))
+
+# rename test stats and combine #
+split_ofc_encoding_reg_df <- split_ofc_encoding_reg_df %>%
+  rename(test_stat_real_reg = test_stat_real) %>%
+  rename(permuted_p_reg = permuted_p)
+
+split_ofc_encoding_ttype_df <- split_ofc_encoding_ttype_df %>%
+  rename(test_stat_real_ttype = test_stat_real) %>%
+  rename(permuted_p_ttype = permuted_p)
+
+split_ofc_encoding_df <- full_join(split_ofc_encoding_reg_df, split_ofc_encoding_ttype_df)
+
+
+```
+
+```{r alternate-hyp-removal}
+
+## electrodes with differences in noise between trial types ##
+trial_dep_noise_df <- read_csv(path(here(), "results", "trial_dep_differences_noise.csv"))
+
+
+## electrodes better explained by max/min unified encoding ##
+split_v_uni_max_df <- read_csv(path(here(), "results", "unified_max_split_elecs.csv"))
+
+```
+
+```{r prep-dfs}
+
+## exclude elecs from alt explanantion analyses ##
+split_ofc_encoding_df <- split_ofc_encoding_df %>%
+  mutate(elec_epoch_ids = paste(subject, electrode, epoch, sep = "_")) %>%
+  mutate_cond(elec_epoch_ids %in% trial_dep_noise_df$elec_epoch_ids, permuted_p_reg =1, permuted_p_ttype = 1) %>%
+  mutate_cond(reg_id %in% split_v_uni_max_df$reg_id, permuted_p_reg =1, permuted_p_ttype = 1)
+
+
+# fdr correctyed df 
+split_ofc_encoding_df_fdr <- split_ofc_encoding_df %>%
+  select(reg_id, subject, electrode, predictor, epoch, permuted_p_reg, permuted_p_ttype) %>%
+  distinct() %>%
+  group_by(epoch, predictor) %>%
+  mutate(perm_p_reg_fdr = p.adjust(permuted_p_reg, method = "fdr")) %>%
+  mutate(perm_p_ttype_fdr = p.adjust(permuted_p_ttype, method = "fdr"))
+
+# get the encoding type #
+scatter_plot_r2_df <- split_ofc_encoding_df %>%
+  group_by(reg_id) %>%
+  mutate(mean_adv = mean(Advantageous)) %>%
+  mutate(mean_dis = mean(Disadvantageous)) %>%
+  select(mean_adv, mean_dis, reg_id) %>%
+  distinct() 
+
+scatter_plot_r2_fdr_df <- left_join(scatter_plot_r2_df, split_ofc_encoding_df_fdr)
+
+
+scatter_plot_r2_fdr_df <- scatter_plot_r2_fdr_df %>%
+  mutate(sig = if_else(mean_dis > mean_adv & perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05, "Disadvantageous", 
+                       if_else(mean_adv >= mean_dis & perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05, "Advantageous", "Not Sig.")))
+
+```
+
+
+
+```{r create-table}
+
+# Create Supplement Table 2 #
+
+split_hfa_fdr_sig_table <- split_ofc_encoding_df_fdr %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  filter(perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05) %>%
+  select(subject, elec_id, predictor, epoch) %>%
+  distinct() %>%
+  group_by(predictor, epoch) %>%
+  mutate(sig_count_per_epoch =  length(unique(elec_id))) %>%
+  mutate(percent_of_elecs_per_epoch = (sig_count_per_epoch/ 136) * 100) %>%
+  mutate(unique_subs_by_epoch = length(unique(subject))) %>%
+  group_by(predictor) %>%
+  mutate(sig_count = length(unique(elec_id))) %>%
+  mutate(percent_of_elecs = (sig_count/ 136) * 100) %>%
+  mutate(unique_subs = length(unique(subject))) %>%
+  select(predictor, epoch, sig_count_per_epoch, unique_subs_by_epoch, percent_of_elecs_per_epoch, sig_count, unique_subs, percent_of_elecs) %>%
+  distinct() %>%
+  mutate(percent_of_elecs_per_epoch = round(percent_of_elecs_per_epoch, 2)) %>%
+  mutate(percent_of_elecs = round(percent_of_elecs, 2)) %>%
+  arrange(desc(predictor), desc(epoch))  %>%
+  mutate(predictor = if_else(predictor == "self_var_payoff", "Self-Offer",
+                                     if_else(predictor == "other_var_payoff", "Other-Offer",
+                                             if_else(predictor == "max", "Max", "Min"))))
+
+split_hfa_fdr_sig_table %>%
+  kable() %>%
+  kable_styling()
+```
+
+
+# Figure 3
+
+```{r load-raw-hfa-data, echo = F}
+
+# load raw hfa data #
+all_brain_data_pres <-  read_csv(path(here(), "/munge/all_brain_data_pres_1_3_2022.csv"), 
+                                 col_types = cols())
+all_brain_data_pre_choice <-  read_csv(path(here(), "/munge/all_brain_data_pre_choice_1_3_2022.csv"), 
+                                       col_types = cols())
+all_brain_data_post_choice <-  read_csv(path(here(), "/munge/all_brain_data_post_choice_1_3_2022.csv"),
+                                        col_types = cols())
+
+```
+
+```{r example-raw-data-plot}
+
+# create Figure 3A #
+
+adv_plot <- all_brain_data_post_choice %>%
+  filter(subject == "ST40" & electrodes == "FG17" & trial_type == "Advantageous") %>%
+  pivot_longer(cols = starts_with("post_"), values_to = "HFA", names_to = "bin") %>%
+  mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+  filter(time <= 1000) %>%
+  ggplot(., aes(x = self_var_payoff, y = HFA)) +
+  geom_point(color = "#5BA6D6") +
+  geom_smooth(method = 'lm', formula = 'y~x', color = 'black', fill = 'grey') +
+  facet_wrap(~time, nrow = 1) +
+  labs(x = "Self Offer", subtitle = "Advantageous Trials") +
+  theme(panel.background = element_blank(), legend.position = "top",
+        strip.text = element_blank(),
+        legend.title = element_text(family = "Arial", color = '#2D2327', size = 22),
+        legend.text = element_text(family = "Arial", color = '#2D2327', size = 22),
+        axis.title = element_text(family = "Arial", color = '#2D2327', size = 22), 
+        axis.text = element_text(family = "Arial", color = '#2D2327', size = 20), 
+        plot.subtitle = element_text(family = "Arial", color = '#2D2327', size = 24, face = 'bold'),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+dis_plot <- all_brain_data_post_choice %>%
+  filter(subject == "ST40" & electrodes == "FG17" & trial_type == "Disadvantageous") %>%
+  pivot_longer(cols = starts_with("post_"), values_to = "HFA", names_to = "bin") %>%
+  mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+  filter(time <= 1000) %>%
+  ggplot(., aes(x = self_var_payoff, y = HFA)) +
+  geom_point(color = "#E4635C") +
+  geom_smooth(method = 'lm', formula = 'y~x', color = 'black', fill = 'grey') +
+  facet_wrap(~time, nrow = 1) +
+  labs(x = "Self Offer", subtitle = "Disadvantageous Trials") +
+  theme(panel.background = element_blank(), legend.position = "top",
+        strip.text = element_blank(),
+        legend.title = element_text(family = "Arial", color = '#2D2327', size = 22),
+        legend.text = element_text(family = "Arial", color = '#2D2327', size = 22),
+        axis.title = element_text(family = "Arial", color = '#2D2327', size = 22), 
+        axis.text = element_text(family = "Arial", color = '#2D2327', size = 20), 
+        plot.subtitle = element_text(family = "Arial", color = '#2D2327', size = 24, face = "bold"),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+
+ggsave(filename = path(here(), "figures", "paper", "hfa_self_example_plots.tif"),
+     device = "tiff",
+     width = 10,
+     height = 12,
+     units = "in",
+     dpi = 350,
+     plot =   arrangeGrob(grobs = list(adv_plot, dis_plot), nrow = 2, ncol = 1))
+
+
+```
+
+```{r example-elecs-r2}
+
+# create Figure 3B #
+
+sig_split_elecs_df <- scatter_plot_r2_fdr_df %>%
+  filter(perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05)
+
+
+# sample self var in adv
+example_selfv_elec_stats <- sig_split_elecs_df %>%
+  ungroup() %>%
+  filter(reg_id %in% c("GP51_OFG46_self_var_payoff_pre-choice", "GP51_OFG46_self_var_payoff_post-choice")) ## fdr permuted p ~ 0
+
+
+example_selfva_elec_df <- split_ofc_encoding_df %>%
+  ungroup() %>%
+  filter(reg_id %in% c("GP51_OFG46_self_var_payoff_pre-choice", "GP51_OFG46_self_var_payoff_post-choice")) %>%
+  mutate(time = if_else(epoch == "pre-choice", -50 * as.numeric(gsub("pre_", "", bin)),
+                        50 * as.numeric(gsub("post_", "", bin)))) %>%
+  pivot_longer(cols = c(Disadvantageous, Advantageous), names_to = "State", values_to = "R2") 
+
+self_adv_plot <- example_selfva_elec_df %>%
+  ggplot(., aes(x = time, y = R2, color = State)) +
+  geom_vline(xintercept = 0, color = 'black', linetype = 'dashed') +
+  geom_point() +
+  geom_line() +
+  # ylim(0, .22) +
+  theme(panel.background = element_blank(), legend.position = "top",
+        legend.title = element_text(family = "Arial", color = '#2D2327', size = 20),
+        legend.text = element_text(family = "Arial", color = '#2D2327', size = 20),
+        axis.title = element_text(family = "Arial", color = '#2D2327', size = 20), 
+        axis.text = element_text(family = "Arial", color = '#2D2327', size = 20), 
+        plot.subtitle = element_text(family = "Arial", color = '#2D2327', size = 20),
+        plot.title = element_text(family = "Arial", color = '#2D2327', size = 21)) + 
+  labs(x = "Time (in ms)", color = "", subtitle = "Example Electrode 1", title = "Self Offer Encoded Only in Adv. Trials")
+
+# sample self var in dis
+self_dis_split <- sig_split_elecs_df %>%
+  filter(predictor == "self_var_payoff" & sig == "Disadvantageous")
+
+example_selfvd_elec_df <- split_ofc_encoding_df %>%
+  ungroup() %>%
+  filter(reg_id %in% c("GP51_OFG22_self_var_payoff_pre-choice", "GP51_OFG22_self_var_payoff_post-choice")) %>%
+  mutate(time = if_else(epoch == "pre-choice", -50 * as.numeric(gsub("pre_", "", bin)),
+                        50 * as.numeric(gsub("post_", "", bin)))) %>%
+  pivot_longer(cols = c(Disadvantageous, Advantageous), names_to = "State", values_to = "R2") 
+
+self_dis_plot <- example_selfvd_elec_df %>%
+  ggplot(., aes(x = time, y = R2, color = State)) +
+  geom_vline(xintercept = 0, color = 'black', linetype = 'dashed') +
+  geom_point() +
+  geom_line() +
+  # ylim(0, .22) +
+  theme(panel.background = element_blank(), legend.position = "top",
+        legend.title = element_text(family = "Arial", color = '#2D2327', size = 20),
+        legend.text = element_text(family = "Arial", color = '#2D2327', size = 20),
+        axis.title = element_text(family = "Arial", color = '#2D2327', size = 20), 
+        axis.text = element_text(family = "Arial", color = '#2D2327', size = 20), 
+        plot.subtitle = element_text(family = "Arial", color = '#2D2327', size = 20),
+        plot.title = element_text(family = "Arial", color = '#2D2327', size = 21)) + 
+  labs(x = "Time (in ms)", color = "", subtitle = "Example Electrode 2", title = "Self Offer Encoded Only in Dis. Trials")
+
+
+# sample other var in adv
+other_adv_split <- scatter_plot_r2_fdr_df %>%
+  filter(predictor == "other_var_payoff" & sig == "Advantegous")
+
+example_othera_elec_df <- split_ofc_encoding_df %>%
+  ungroup() %>%
+  filter(reg_id %in% c("GP51_OFG60_other_var_payoff_pre-choice", "GP51_OFG60_other_var_payoff_post-choice")) %>%
+  mutate(time = if_else(epoch == "pre-choice", -50 * as.numeric(gsub("pre_", "", bin)),
+                        50 * as.numeric(gsub("post_", "", bin)))) %>%
+  pivot_longer(cols = c(Disadvantageous, Advantageous), names_to = "State", values_to = "R2") 
+
+other_adv_plot <- example_othera_elec_df %>%
+  ggplot(., aes(x = time, y = R2, color = State)) +
+  geom_vline(xintercept = 0, color = 'black', linetype = 'dashed') +
+  geom_point() +
+  geom_line() +
+  # ylim(0, .22) +
+  theme(panel.background = element_blank(), legend.position = "top",
+        legend.title = element_text(family = "Arial", color = '#2D2327', size = 20),
+        legend.text = element_text(family = "Arial", color = '#2D2327', size = 20),
+        axis.title = element_text(family = "Arial", color = '#2D2327', size = 20), 
+        axis.text = element_text(family = "Arial", color = '#2D2327', size = 20), 
+        plot.subtitle = element_text(family = "Arial", color = '#2D2327', size = 20),
+        plot.title = element_text(family = "Arial", color = '#2D2327', size = 21)) + 
+  labs(x = "Time (in ms)", color = "", subtitle = "Example Electrode 3", title = "Other Offer Encoded Only in Adv. Trials")
+
+
+# sample other var in dis
+other_dis_split <- scatter_plot_r2_fdr_df %>%
+  filter(predictor == "other_var_payoff" & sig == "Disadvantageous")
+
+example_othervd_elec_df <- split_ofc_encoding_df %>%
+  ungroup() %>%
+  filter(reg_id %in% c("GP51_OFG43_other_var_payoff_pre-choice", "GP51_OFG43_other_var_payoff_post-choice")) %>%
+  mutate(time = if_else(epoch == "pre-choice", -50 * as.numeric(gsub("pre_", "", bin)),
+                        50 * as.numeric(gsub("post_", "", bin)))) %>%
+  pivot_longer(cols = c(Disadvantageous, Advantageous), names_to = "State", values_to = "R2") 
+
+other_dis_plot <- example_othervd_elec_df %>%
+  ggplot(., aes(x = time, y = R2, color = State)) +
+  geom_vline(xintercept = 0, color = 'black', linetype = 'dashed') +
+  geom_point() +
+  geom_line() +
+  # ylim(0, .22) +
+  theme(panel.background = element_blank(), legend.position = "top",
+        legend.title = element_text(family = "Arial", color = '#2D2327', size = 20),
+        legend.text = element_text(family = "Arial", color = '#2D2327', size = 20),
+        axis.title = element_text(family = "Arial", color = '#2D2327', size = 20), 
+        axis.text = element_text(family = "Arial", color = '#2D2327', size = 20), 
+        plot.subtitle = element_text(family = "Arial", color = '#2D2327', size = 20),
+        plot.title = element_text(family = "Arial", color = '#2D2327', size = 21)) + 
+  labs(x = "Time (in ms)", color = "", subtitle = "Example Electrode 4", title = "Other Offer Encoded Only in Dis. Trials")
+
+
+
+plot(arrangeGrob(grobs = list(self_adv_plot, self_dis_plot, other_adv_plot, other_dis_plot), nrow = 2, ncol = 2))
+
+
+ggsave(filename = path(here(), "figures", "paper", "r2_plots.tif"),
+     device = "tiff",
+     width = 14,
+     height = 13,
+     units = "in",
+     dpi = 350,
+     plot =   arrangeGrob(grobs = list(self_adv_plot, self_dis_plot, other_adv_plot, other_dis_plot), nrow = 2, ncol = 2))
+
+
+
+```
+
+
+### Figure 3C
+
+```{r load-advdispval-for-flow-plot}
+
+## Prep for Figure 3C ##
+
+# load unified results #
+advdis_hfa_data <- read_csv(path(here(), 'results', 'single_regressions', 'compiled_ofc_ogpermutation_wpvalues_advdispvals_single_regressions_1_28_2022.csv'))
+
+# clean #
+advdis_hfa_data_clean<- advdis_hfa_data %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  mutate(reg_id = paste(subject, electrode, predictor, epoch, sep = "_")) 
+  #filter(!reg_id %in% both_sig_elecs) # does not include elecs that were also sig for split, does not change pattern of results
+
+# correct #
+advdis_hfa_data_fdr <- advdis_hfa_data_clean %>%
+  select(reg_id, subject, electrode, predictor, epoch, permuted_p, adv_pval, dis_pval) %>%
+  distinct() %>%
+  group_by(epoch, predictor) %>%
+  mutate(perm_p_fdr = p.adjust(permuted_p, method = "fdr")) %>%
+  mutate(adv_pval_fdr = p.adjust(adv_pval, method = "fdr")) %>%
+  mutate(dis_pval_fdr = p.adjust(dis_pval, method = "fdr")) 
+
+advdis_hfa_fdr_sig <- advdis_hfa_data_fdr %>%
+  # only split variables
+  filter(predictor %in% c("other_var_payoff", "self_var_payoff", "max", "min")) %>%
+  mutate(sig = if_else(adv_pval < .05 & dis_pval < .05, "SIG", "NSIG")) %>%
+  select(subject, electrode, predictor, epoch, sig) %>%
+  mutate(elec_id = paste0(subject, "_", electrode)) %>%
+  distinct() %>%
+  pivot_wider(names_from = epoch, values_from = sig) %>%
+  rename(post_unified = `post-choice`, pre_unified = `pre-choice`, pres_unified = presentation) %>%
+  select(subject, electrode, predictor, pres_unified, pre_unified, post_unified) %>%
+  distinct()
+
+ggthemr("light")
+## data exploration to make sure it looks okay
+advdis_hfa_data_fdr %>%
+  mutate(only_one = if_else(adv_pval < .05 & dis_pval < .05, "Both", 
+                            if_else(adv_pval < .05, "Only Adv", 
+                            if_else(dis_pval < .05, "Only Dis", "Neither")))) %>%
+  mutate(only_one_fdr = if_else(adv_pval < .05 & dis_pval < .05, "Both", 
+                          if_else(adv_pval < .05, "Only Adv", 
+                          if_else(dis_pval < .05, "Only Dis", "Neither")))) %>%
+  filter(only_one != "Neither") %>%
+  mutate(split_sig = permuted_p < .05) %>%
+  select(reg_id, only_one, permuted_p, split_sig) %>%
+  distinct() %>%
+  ggplot(., aes(x = only_one, fill = split_sig)) +
+  geom_bar(position = position_dodge2()) +
+  labs(x = "New Analysis Significance", fill = "Sig in Split Analysis") +
+  theme(panel.background = element_rect(fill = "white"))
+
+# check if old pvalues match the new ones-- they do, thank goodness
+orig_pvals <- scatter_plot_r2_fdr_df %>% select(reg_id, permuted_p_reg) %>% distinct() %>% arrange(reg_id)
+new_pvals <- advdis_hfa_data_fdr %>% select(reg_id, permuted_p) %>% distinct() %>% arrange(reg_id)  
+
+```
+
+
+```{r flow-plot}
+
+## Plot Figure 3C ##
+
+# calculate table for comparison
+alluv_split_table <- scatter_plot_r2_fdr_df %>%
+  ungroup() %>%
+  mutate(elec_id = paste0(subject, "_", electrode)) %>%
+  select(elec_id, predictor, epoch, sig) %>%
+  distinct() %>%
+  pivot_wider(names_from = epoch, values_from = sig) %>%
+  filter(!(presentation == 'Not Sig.' & `pre-choice` == 'Not Sig.' & `post-choice` == 'Not Sig.')) %>%
+  group_by(presentation, `pre-choice`, `post-choice`) %>%
+  add_count()
+
+# prep alluvial data frame
+alluv_split_prep_df <- scatter_plot_r2_fdr_df %>%
+  ungroup() %>%
+  select(subject, electrode, predictor, epoch, sig) %>%
+  mutate(elec_id = paste0(subject, "_", electrode)) %>%
+  distinct() %>%
+  pivot_wider(names_from = epoch, values_from = sig) %>%
+  filter(!(presentation == 'Not Sig.' & `pre-choice` == 'Not Sig.' & `post-choice` == 'Not Sig.'))
+
+# combine unified data with alluvial prep
+alluv_split_prep_uni_df <- left_join(alluv_split_prep_df, advdis_hfa_fdr_sig)
+
+# if not sig in split anlaysis but sig in unified mark as unified
+alluv_split_prep_uni_df <- alluv_split_prep_uni_df %>%
+  mutate(presentation = if_else(presentation == "Not Sig." & pres_unified == "SIG", "Unified", presentation)) %>%
+  mutate(`pre-choice` = if_else(`pre-choice` == "Not Sig." & pre_unified == "SIG", "Unified", `pre-choice`)) %>%
+  mutate(`post-choice` = if_else(`post-choice` == "Not Sig." & post_unified == "SIG", "Unified", `post-choice`)) %>%
+  select(-pres_unified, -pre_unified, -post_unified) %>%
+  distinct()
+
+# finally convert to ggalluvial format
+alluv_split_df <- alluv_split_prep_uni_df %>%
+  group_by(presentation, `pre-choice`, `post-choice`) %>%
+  add_count() %>%
+  select(presentation, `pre-choice`, `post-choice`, n, elec_id) %>%
+  ungroup() %>%
+  make_long(presentation, `pre-choice`, `post-choice`) %>%
+  mutate(node = factor(node, 
+                       levels = c('Not Sig.', 'Unified', 'Advantageous', 'Disadvantageous', 'NA'),
+                       labels = c('      Neither      ', '       Both       ', '   Advantageous   ', 'Disadvantageous', 'NA'),
+                       exclude = 'none')) %>%
+  mutate(next_node = factor(next_node, 
+                      levels = c('Not Sig.', 'Unified', 'Advantageous', 'Disadvantageous', 'NA'), 
+                      labels = c('      Neither      ', '       Both       ', '   Advantageous   ', 'Disadvantageous', 'NA'), 
+                      exclude = 'none'))
+
+
+alluvial_plot <- ggplot(alluv_split_df, aes(x = x, 
+               next_x = next_x, 
+               node = node, 
+               next_node = next_node,
+               label = node,
+               fill = node)) +
+  geom_alluvial(flow.alpha = 0.75, node.color = 1, width = .4) +
+  geom_alluvial_label(color = "white",  size = 3.5) +
+  labs(x = "", y = "Electrode Count", fill = "Predictor", title = "Inequity dependent encoding state is consistent across epochs") +
+  theme(panel.background = element_rect(fill = "white"),
+        legend.position = 'none', 
+        legend.title = element_text(family = "Arial", color = '#2D2327', size = 16),
+        legend.text = element_text(family = "Arial", color = '#2D2327', size = 16),
+        axis.title = element_text(family = "Arial", color = '#2D2327', size = 18), 
+        axis.text = element_text(family = "Arial", color = '#2D2327', size = 14), 
+        plot.title = element_text(family = "Arial", color = '#2D2327', size = 14, hjust = .5)) +
+        scale_fill_manual(values = c('grey', "#876194", "#5BA6D6", "#E4635C"))
+
+
+
+ggsave(filename = path(here(), "figures", "paper", "split_encoding_alluvial_plot.tif"),
+     device = "tiff",
+     width =11,
+     height = 3.7,
+     units = "in",
+     dpi = 350,
+     plot =   alluvial_plot)
+ 
+```
+

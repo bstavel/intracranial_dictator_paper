@@ -57,6 +57,7 @@ source(path(here(), "R", 'mutate_cond.R'))
 
 ```
 
+# Prep HFA Data for Regression Analysis
 
 This script is loads, cleans, and merges the high frequency activity for both presentation-locked and choice-locked data. The results are csvs ready for input to the regression analysis.
 
@@ -1358,7 +1359,7 @@ beep(2)
 
 ## For Joe's machine learning practice
 
-```{r load-hg-data-presentation-locked-gp51, eval=F}
+```{r joe-load-hg-data-presentation-locked-gp51, eval=F}
 
 ### GP51 ~ PRESENTATION ###
 
@@ -1405,10 +1406,10 @@ load_GP51_joe_data <- function(file_path_to_power_data, clean_name, band) {
 # clean_name <- path(here(), "munge", "GP51", "delta_behave_presentation_rscaler_2575_200.csv")
 # load_GP51_presentation_data(file_path_to_power_data, clean_name, band)
 # # theta #
-# band <- "theta"
-# file_path_to_power_data <- path(here(), "munge", "savio_cluster", "GP51_theta_munge_presentation_locked_rscaler_2575.csv")
-# clean_name <- path(here(), "munge", "GP51", "theta_behave_presentation_rscaler_2575_200.csv")
-# load_GP51_presentation_data(file_path_to_power_data, clean_name, band)
+band <- "theta"
+file_path_to_power_data <- path(here(), "munge", "savio_cluster", "GP51_theta_munge_presentation_locked_rscaler_2575.csv")
+clean_name <- path(here(), "munge", "GP51", "theta_behave_presentation_all_elecs_rscaler_2575_10_ml.csv")
+load_GP51_joe_data(file_path_to_power_data, clean_name, band)
 # # alpha #
 # band <- "alpha"
 # file_path_to_power_data <- path(here(), "munge", "savio_cluster", "GP51_alpha_munge_presentation_locked_rscaler_2575.csv")
@@ -1425,10 +1426,89 @@ load_GP51_joe_data <- function(file_path_to_power_data, clean_name, band) {
 # clean_name <- path(here(), "munge", "GP51", "gamma_behave_presentation_rscaler_2575_200.csv")
 # load_GP51_presentation_data(file_path_to_power_data, clean_name, band)
 # hfa #
+# band <- "hfa"
+# file_path_to_power_data <- path(here(), "munge", "savio_cluster", "GP51_hfa_munge_presentation_locked_rscaler_2575.csv")
+# clean_name <- path(here(), "munge", "GP51", "hfa_behave_presentation_all_elecs_rscaler_2575_10_ml.csv")
+# load_GP51_joe_data(file_path_to_power_data, clean_name, band)
+
+beep(2)
+```
+
+```{r jow-load-hg-data-presentation-locked-st40, eval=T}
+
+
+### ST40 ~ PRESENTATION ###
+
+## function to filter to ROI, baseline, compress, and c=merge within behvaioral data ##
+load_ST40_joe_data <- function(file_path_to_power_data, clean_name, band) {
+
+  # necessary paths #
+  file_path_to_electrode_names <- path(here(), "munge", "savio_cluster", "ST40_electrodes_presentation_locked_rscaler_2575.csv")
+  # file_path_to_elecs_of_interest <- path(here(), "munge", "ST40_elecs_of_interest.csv")
+  
+  # load data #
+  hg_data <- load_high_gamma_data(file_path_to_power_data, file_path_to_electrode_names)
+  # elecs_to_use <- read.csv(file_path_to_elecs_of_interest)
+  
+  # add behavioral data, remove bad trials, remove behavioral data again #
+  hg_data <- merge.data.frame(hg_data, behave_data_ST40, by.x = "trial", by.y = "round", all.x = T, all.y = F)
+  hg_data <- hg_data %>% filter(!is.na(RT)) %>% select(trial, electrodes, starts_with("time"))
+
+  
+  # filter to good electrodes #
+  # hg_data <- hg_data %>% filter(grepl(paste(elecs_to_use$Electrode, collapse = "|"), electrodes))
+  
+  # remove noisy trial data #
+  hg_data <- hg_data %>% filter(!trial %in% c(141, 200, 198, 180))
+  
+  # save baseline #
+  baseline_data <- hg_data[, 1:200]
+  baseline_data <- cbind(baseline_data, hg_data$electrodes, hg_data$trial)
+  write.csv(baseline_data, path(here(), "munge", paste0(band, "baseline_ST40.csv")))
+  
+  # average and baseline #
+  hg_clean <- rolling_window_and_baseline(hg_data, lWin = 10, lOver = 5, choice_locked = F)
+  
+  # with behavior #
+  hg_behave <- merge.data.frame(hg_clean, behave_data_ST40, by.x = "trial", by.y = "round", all.x = T, all.y = F)
+  # clean any missing RTs #
+  hg_behave <- hg_behave %>% filter(!is.na(RT))
+  # save it #
+  write.csv(hg_behave, clean_name)
+
+}
+
+
+# # delta #
+# band <- "delta"
+# file_path_to_power_data <- path(here(), "munge", "savio_cluster", "ST40_delta_munge_presentation_locked_rscaler_2575.csv")
+# clean_name <- path(here(), "munge", "ST40", "delta_behave_presentation_rscaler_2575_200.csv")
+# load_ST40_presentation_data(file_path_to_power_data, clean_name, band)
+# # theta #
+band <- "theta"
+file_path_to_power_data <- path(here(), "munge", "savio_cluster", "ST40_theta_munge_presentation_locked_rscaler_2575.csv")
+clean_name <- path(here(), "munge", "ST40", "theta_behave_presentation_all_elecs_rscaler_2575_10_ml.csv")
+load_ST40_joe_data(file_path_to_power_data, clean_name, band)
+# # alpha #
+# band <- "alpha"
+# file_path_to_power_data <- path(here(), "munge", "savio_cluster", "ST40_alpha_munge_presentation_locked_rscaler_2575.csv")
+# clean_name <- path(here(), "munge", "ST40", "alpha_behave_presentation_rscaler_2575_200.csv")
+# load_ST40_presentation_data(file_path_to_power_data, clean_name, band)
+# # beta #
+# band <- "beta"
+# file_path_to_power_data <- path(here(), "munge", "savio_cluster", "ST40_beta_munge_presentation_locked_rscaler_2575.csv")
+# clean_name <- path(here(), "munge", "ST40", "beta_behave_presentation_rscaler_2575_200.csv")
+# load_ST40_presentation_data(file_path_to_power_data, clean_name, band)
+# # gamma #
+# band <- "gamma"
+# file_path_to_power_data <- path(here(), "munge", "savio_cluster", "ST40_gamma_munge_presentation_locked_rscaler_2575.csv")
+# clean_name <- path(here(), "munge", "ST40", "gamma_behave_presentation_rscaler_2575_200.csv")
+# load_ST40_presentation_data(file_path_to_power_data, clean_name, band)
+# hfa #
 band <- "hfa"
-file_path_to_power_data <- path(here(), "munge", "savio_cluster", "GP51_hfa_munge_presentation_locked_rscaler_2575.csv")
-clean_name <- path(here(), "munge", "GP51", "hfa_behave_presentation_all_elecs_rscaler_2575_10_ml.csv")
-load_GP51_joe_data(file_path_to_power_data, clean_name, band)
+file_path_to_power_data <- path(here(), "munge", "savio_cluster", "ST40_hfa_munge_presentation_locked_rscaler_2575.csv")
+clean_name <- path(here(), "munge", "ST40", "hfa_behave_presentation_all_elecs_rscaler_2575_10_ml.csv")
+load_ST40_joe_data(file_path_to_power_data, clean_name, band)
 
 beep(2)
 ```

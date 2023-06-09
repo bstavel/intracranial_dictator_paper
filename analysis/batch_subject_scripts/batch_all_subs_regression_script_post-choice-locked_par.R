@@ -128,10 +128,82 @@ for(sub in subs){
   # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "trial_type", nBins, region_name =  "All", niter, sub = sub, tag = "delta-post-choice-locked-comb-only-hilbertRS")
   # 
   #   
-  # ### theta ###
+  ### theta ###
+
+  ## read in data ##
+  path_hp_clean <- path(here(), "munge", sub, "theta_behave_choice_rscaler_2575_200.csv")
+  power_behave <-  read.csv(path_hp_clean)
+  # merge with elecs #
+  brain_behave_data <- power_behave %>%
+    filter(grepl(paste(all_elecs$Electrode, collapse = "|"), electrodes)) %>%
+    rowwise() %>%
+    mutate(pie_size = self_var_payoff + other_var_payoff) %>%
+    mutate(ratio = other_var_payoff / self_var_payoff) %>%
+    mutate(max_self = max(self_var_payoff, 10)) %>%
+    mutate(max_other = max(other_var_payoff, 10)) %>%
+    mutate(min_self = min(self_var_payoff, 10)) %>%
+    mutate(min_other = min(other_var_payoff, 10)) %>%
+    mutate(max = max(self_var_payoff, other_var_payoff)) %>%
+    mutate(min = min(self_var_payoff, other_var_payoff)) %>%
+    mutate(trial_type = if_else(self_var_payoff == other_var_payoff, "equality",
+                                if_else(self_var_payoff > other_var_payoff,
+                                        "Advantageous", "Disadvantageous"))) %>%
+    ungroup()  %>%
+    filter(trial_type != "equality")
+
+  all_electrodes <- unique(brain_behave_data$electrodes)
+  # bin names #
+  nBins <- colnames(brain_behave_data %>% select(starts_with("post_")))[1:20]
+
+  # ## run regressions ##
+  # # pie size #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "pie_size", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # # disadv ineq #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "ineq_disadvent", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # # disadv ineq #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "ineq_advent", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # # ineq_var #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "ineq_var", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # # ineq_chosen #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "ineq_choice", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # # ineq_foregone #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "ineq_foregone", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # # self payoff #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "self_payoff", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # # other payoff #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "other_payoff", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # # self foregone #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "self_foregone", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # # other foregone #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "other_foregone", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # self var paroff #
+  run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "self_var_payoff", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # other var payoff #
+  run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "other_var_payoff", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # # self diff #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "self_diff", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # # other diff #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "other_diff", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # # max self #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "max_self", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # # max other #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "max_other", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # # min self #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "min_self", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # # min other #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "min_other", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # max #
+  run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "max", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # min #
+  run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "min", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # trial type #
+  run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "trial_type", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+
+  
+  # ### HFA ###
   # 
   # ## read in data ##
-  # path_hp_clean <- path(here(), "munge", sub, "theta_behave_choice_rscaler_2575_200.csv")
+  # path_hp_clean <- path(here(), "munge", sub, "hfa_behave_choice_rscaler_2575_200.csv")
   # power_behave <-  read.csv(path_hp_clean)
   # # merge with elecs #
   # brain_behave_data <- power_behave %>%
@@ -156,116 +228,44 @@ for(sub in subs){
   # nBins <- colnames(brain_behave_data %>% select(starts_with("post_")))[1:20]
   # 
   # ## run regressions ##
-  # # pie size #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "pie_size", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
-  # # disadv ineq #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "ineq_disadvent", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
-  # # disadv ineq #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "ineq_advent", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # # # pie size #
+  # # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "pie_size", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
   # # ineq_var #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "ineq_var", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
-  # # ineq_chosen #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "ineq_choice", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
-  # # ineq_foregone #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "ineq_foregone", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
-  # # self payoff #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "self_payoff", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
-  # # other payoff #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "other_payoff", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
-  # # self foregone #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "self_foregone", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
-  # # other foregone #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "other_foregone", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "ineq_var_abs", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
+  # # # ineq_chosen #
+  # # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "ineq_choice", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
+  # # # ineq_foregone #
+  # # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "ineq_foregone", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
+  # # # self payoff #
+  # # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "self_payoff", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
+  # # # other payoff #
+  # # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "other_payoff", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
+  # # # self foregone #
+  # # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "self_foregone", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
+  # # # other foregone #
+  # # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "other_foregone", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
   # # self var paroff #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "self_var_payoff", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "self_var_payoff", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
   # # other var payoff #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "other_var_payoff", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
-  # # self diff #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "self_diff", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
-  # # other diff #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "other_diff", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
-  # # max self #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "max_self", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
-  # # max other #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "max_other", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
-  # # min self #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "min_self", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
-  # # min other #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "min_other", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "other_var_payoff", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
+  # # # self diff #
+  # # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "self_diff", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
+  # # # other diff #
+  # # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "other_diff", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
+  # # # max self #
+  # # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "max_self", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
+  # # # max other #
+  # # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "max_other", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
+  # # # min self #
+  # # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "min_self", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
+  # # # min other #
+  # # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "min_other", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
   # # max #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "max", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "max", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
   # # min #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "min", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
-  # # trial type #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "trial_type", nBins, region_name =  "All", niter, sub = sub, tag = "theta-post-choice-locked-comb-only-hilbertRS")
-
-  
-  ### HFA ###
-
-  ## read in data ##
-  path_hp_clean <- path(here(), "munge", sub, "hfa_behave_choice_rscaler_2575_200.csv")
-  power_behave <-  read.csv(path_hp_clean)
-  # merge with elecs #
-  brain_behave_data <- power_behave %>%
-    filter(grepl(paste(all_elecs$Electrode, collapse = "|"), electrodes)) %>%
-    rowwise() %>%
-    mutate(pie_size = self_var_payoff + other_var_payoff) %>%
-    mutate(ratio = other_var_payoff / self_var_payoff) %>%
-    mutate(max_self = max(self_var_payoff, 10)) %>%
-    mutate(max_other = max(other_var_payoff, 10)) %>%
-    mutate(min_self = min(self_var_payoff, 10)) %>%
-    mutate(min_other = min(other_var_payoff, 10)) %>%
-    mutate(max = max(self_var_payoff, other_var_payoff)) %>%
-    mutate(min = min(self_var_payoff, other_var_payoff)) %>%
-    mutate(trial_type = if_else(self_var_payoff == other_var_payoff, "equality",
-                                if_else(self_var_payoff > other_var_payoff,
-                                        "Advantageous", "Disadvantageous"))) %>%
-    ungroup()  %>%
-    filter(trial_type != "equality")
-
-  all_electrodes <- unique(brain_behave_data$electrodes)
-  # bin names #
-  nBins <- colnames(brain_behave_data %>% select(starts_with("post_")))[1:20]
-
-  ## run regressions ##
-  # # pie size #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "pie_size", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # ineq_var #
-  run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "ineq_var_abs", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # # ineq_chosen #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "ineq_choice", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # # ineq_foregone #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "ineq_foregone", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # # self payoff #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "self_payoff", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # # other payoff #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "other_payoff", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # # self foregone #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "self_foregone", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # # other foregone #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "other_foregone", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # self var paroff #
-  run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "self_var_payoff", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # other var payoff #
-  run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "other_var_payoff", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # # self diff #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "self_diff", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # # other diff #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "other_diff", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # # max self #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "max_self", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # # max other #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "max_other", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # # min self #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "min_self", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # # min other #
-  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "min_other", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # max #
-  run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "max", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # min #
-  run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "min", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
-  # trial_type #
-  run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "trial_type", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "min", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
+  # # trial_type #
+  # run_permuted_regressions_par(brain_behave_data, electrodes = all_electrodes, regressor = "trial_type", nBins, region_name =  "All", niter, sub = sub, tag = "hfa-post-choice-locked-comb-only-hilbertRS")
 
   # 
   # ### beta ###

@@ -86,6 +86,10 @@ c25 <- c(
 #find . -type f -mtime +10 -maxdepth 1 -exec mv {} before_3-21-21 \;
 ```
 
+## Brain Figure Prep
+
+Plotting helpers to plot the unified analysis effects on the brain
+
 ## Load and prep data
 
 ```{r load-unified-data}

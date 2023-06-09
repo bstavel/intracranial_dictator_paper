@@ -1,0 +1,858 @@
+---
+title: "Unchosen choice vs State-dependent"
+output: html_document
+date: '2022-09-22'
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo <- FALSE,  # don't print the code chunk
+  warning <- FALSE,  # don't print warnings
+  message <- FALSE,  # don't print messages
+  fig.width <- 5,  # set default width of figures
+  fig.height <- 8,  # set default height of figures
+  fig.align <- "center",  # always align figure in center
+  fig.pos <- "H",  # always plot figure at the exact location of the code chunk
+  cache <- FALSE)  # cache results
+
+## libraries ##
+library(tidyverse)
+library(ggplot2)
+library(magrittr)
+# library(summarytools)
+library(ggthemr)
+library(grid)
+library(gtable)
+library(gridExtra)
+library(wesanderson)
+library(ggsci)
+library(zoo)
+library(kableExtra)
+library(lme4)
+library(RColorBrewer)
+library(doParallel)
+library(parallel)
+library(foreach)
+library(here)
+library(fs)
+library(ggcorrplot)
+library(viridis)
+library(lmtest)
+library(gt)
+library(ggalluvial)
+# library(parameters)
+library(factoextra)
+library(NbClust)
+
+## hand written functions ##
+source(path(here(), "R", "load_behave_data.R"))
+source(path(here(), "R", "prep_behave_data.R"))
+source(path(here(), "R", "stretch_start_end.R"))
+source(path(here(), "R", "load_high_gamma_data.R"))
+source(path(here(), "R", "rolling_window_and_baseline.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+source(path(here(), "R", "compile_mult_reg_results.R"))
+# source('~/Projects/nice_r_functions/ggpaired_pretty.R')
+source(path(here(), "R", 'mutate_cond.R'))
+source(path(here(), "R", "load_and_collate_reg_results.R"))
+
+
+
+## plotting helpers ##
+ggthemr("solarized")
+getPalette = colorRampPalette(brewer.pal(9, "Set1"))
+
+c25 <- c(
+  "dodgerblue2", "#E31A1C", # red
+  "green4",
+  "#6A3D9A", # purple
+  "#FF7F00", # orange
+  "black", "gold1",
+  "skyblue2", "#FB9A99", # lt pink
+  "palegreen2",
+  "#CAB2D6", # lt purple
+  "#FDBF6F", # lt orange
+  "gray70", "khaki2",
+  "maroon", "orchid1", "deeppink1", "blue1", "steelblue4",
+  "darkturquoise", "green1", "yellow4", "yellow3",
+  "darkorange4", "brown"
+)
+
+# ## parallelization ##
+# nCores <- 4
+# registerDoParallel(nCores)
+# 
+
+
+#find . -type f -mtime +10 -maxdepth 1 -exec mv {} before_3-21-21 \;
+```
+
+
+## Unchosen/chosen choice vs State-dependent
+
+```
+The authors also need to examine the chosen value variables and consider the equity option as well (self chosen, other chosen, etc). Previous studies in non-human primates have shown that OFC neurons encoded chosen values (Padoa-Schioppa, 2006; Rich and Wallis, 2016). Chosen value could potentially confound the finding reported here - e.g. if a subject only chose an equitable option in the disadvantageous trials, the unit/electrode that encodes chosen value would have the same response for self chosen value and other chosen value, and also stay the same across all disadvantageous trials (because of the task design). This unit/electrode could be misinterpreted as "no encoding" in the disadvantageous condition. The authors need to rule out this alternative hypothesis.
+```
+
+### Plan to address this comment
+
+The reviewer is correct that chosen value could explain the behavior we see in electrodes that encodes `self_var` in advantageous trials only. However, this would not explain electrodes which encode `self_var`  only `disadvantageous` trials, as subjects rarely chose the varying option in `disadvantageous` trials. We detected such encoding patterns in at least one electrode across 7/10 subjects.
+
+However, upon reflecting on the helpful comment we realized that another alternate explanation is that these electrodes might be encoding the unchosen option, which could in theory explain the behavior of our state-dependent encoding electrodes. To rule each of these possibilities out, we first look at our group of `sel_var` encoding electrodes that are active only in the advantageous condition and see if their activity is better explained by `self_choice`. Second, we take the electrodes that are encoding `self_var` in `disadvatnageous` trials and see if they are better explained by the unchosen option, called here `self_foregone`
+
+```{r load-data, echo = F}
+## split results ##
+# load permuted regressor results #
+split_ofc_encoding_reg_df <- read_csv(path(here(), "results", "single_regressions",
+                                       "compiled_ofc_ogpermutation_wpvalues_single_regressions_1_28_2022.csv"))
+
+# load permuted trial results #
+split_ofc_encoding_ttype_df <- read_csv(path(here(), "results", "single_regressions",
+                                       "compiled_ofc_ogpermutation_ttype_wpvalues_single_regressions_1_28_2022.csv"))
+
+# rename test stats and combine #
+split_ofc_encoding_reg_df <- split_ofc_encoding_reg_df %>%
+  rename(test_stat_real_reg = test_stat_real) %>%
+  rename(permuted_p_reg = permuted_p)
+
+split_ofc_encoding_ttype_df <- split_ofc_encoding_ttype_df %>%
+  rename(test_stat_real_ttype = test_stat_real) %>%
+  rename(permuted_p_ttype = permuted_p)
+
+split_ofc_encoding_df <- full_join(split_ofc_encoding_reg_df, split_ofc_encoding_ttype_df)
+
+
+## unified results ##
+unified_hfa_data <- read_csv(path(here(), "results", "single_regressions",
+                                  "compiled_unified_ogpermutation_ofc_results_1_26_2022.csv"))
+
+```
+
+```{r prep-dfs, echo = F}
+
+## prep unified ##
+unified_hfa_data_clean <- unified_hfa_data %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  mutate(reg_id = paste(subject, electrode, predictor, epoch, sep = "_")) 
+
+unified_hfa_data_fdr <- unified_hfa_data_clean %>%
+  select(reg_id, subject, electrode, predictor, epoch, perm_p) %>%
+  distinct() %>%
+  group_by(epoch, predictor) %>%
+  mutate(perm_p_unified_fdr = p.adjust(perm_p, method = "fdr"))
+
+## prep split ##
+split_ofc_encoding_clean<- split_ofc_encoding_df %>%
+  mutate(elec_id = paste(subject, electrode, sep = "_")) %>%
+  mutate(reg_id = paste(subject, electrode, predictor, epoch, sep = "_"))
+
+split_ofc_encoding_fdr <- split_ofc_encoding_clean %>%
+  select(reg_id, subject, electrode, predictor, epoch, permuted_p_reg, permuted_p_ttype) %>%
+  distinct() %>%
+  group_by(epoch, predictor) %>%
+  mutate(perm_p_reg_fdr = p.adjust(permuted_p_reg, method = "fdr")) %>%
+  mutate(perm_p_ttype_fdr = p.adjust(permuted_p_ttype, method = "fdr"))
+
+scatter_plot_r2_df <- split_ofc_encoding_clean %>%
+  group_by(reg_id) %>%
+  mutate(mean_adv = mean(Advantageous)) %>%
+  mutate(mean_dis = mean(Disadvantageous)) %>%
+  select(mean_adv, mean_dis, reg_id) %>%
+  distinct() 
+
+scatter_plot_r2_fdr_df <- left_join(scatter_plot_r2_df, split_ofc_encoding_fdr)
+
+
+scatter_plot_r2_fdr_df <- scatter_plot_r2_fdr_df %>%
+  mutate(sig = if_else(mean_dis > mean_adv & perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05, "Disadvantageous", 
+                       if_else(mean_adv >= mean_dis & perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05, "Advantageous", "Not Sig.")))
+
+
+
+```
+
+```{r load-raw-hfa-data, echo = F}
+
+# load hfa data #
+all_brain_data_pres <-  read_csv(path(here(), "/munge/all_brain_data_pres_1_3_2022.csv"), 
+                                 col_types = cols())
+all_brain_data_pre_choice <-  read_csv(path(here(), "/munge/all_brain_data_pre_choice_1_3_2022.csv"), 
+                                       col_types = cols())
+all_brain_data_post_choice <-  read_csv(path(here(), "/munge/all_brain_data_post_choice_1_3_2022.csv"),
+                                        col_types = cols())
+
+```
+
+```{r prep-sig-dfs, echo = F}
+
+split_ofc_self_encoding_fdr_sig <- scatter_plot_r2_fdr_df %>%
+  filter(predictor %in% c("self_var_payoff")) %>%
+  mutate(elec_id = paste0(subject, "_", electrode)) %>%
+  filter(perm_p_reg_fdr < 0.05 & perm_p_ttype_fdr < 0.05) 
+
+split_ofc_self_encoding_fdr_sig_dis <- split_ofc_self_encoding_fdr_sig %>%
+  filter(sig == "Disadvantageous")
+
+split_ofc_self_encoding_fdr_sig_adv <- split_ofc_self_encoding_fdr_sig %>%
+  filter(sig == "Advantageous")
+
+print(paste0("Number elecs encoding self_var in Dis. Trials: ", length(unique(split_ofc_self_encoding_fdr_sig_dis$elec_id))))
+print(paste0("Number elecs encoding self_var in Adv. Trials: ", length(unique(split_ofc_self_encoding_fdr_sig_adv$elec_id))))
+
+split_ofc_self_pres_encoding_fdr_sig <- split_ofc_self_encoding_fdr_sig %>%
+  filter(epoch == "presentation")
+
+split_ofc_self_pre_encoding_fdr_sig <- split_ofc_self_encoding_fdr_sig %>%
+  filter(epoch == "pre-choice")
+
+split_ofc_self_post_encoding_fdr_sig <- split_ofc_self_encoding_fdr_sig %>%
+  filter(epoch == "post-choice")
+
+```
+
+### Example electrode seeming to encode `self_var` in `Advantageous` Trials
+
+This electrode significantly encoded `self-var` in a state-dependent manner with preferential encoding for `Advantageous` trials only according to our original analyses. We will look to see if the electrode's behavior could be better explained by `self_choice` across all trials.
+
+```{r example-elec-state-dep-adv}
+
+
+adv_plot <- all_brain_data_post_choice %>%
+  filter(subject == "ST40" & electrodes == "FG17" & trial_type == "Advantageous") %>%
+  pivot_longer(cols = starts_with("post_"), values_to = "HFA", names_to = "bin") %>%
+  mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+  filter(time <= 1000) %>%
+  ggplot(., aes(x = self_var_payoff, y = HFA)) +
+  geom_point(color = "#5BA6D6") +
+  geom_smooth(method = 'lm', formula = 'y~x', color = 'black', fill = 'grey') +
+  facet_wrap(~time, nrow = 1) +
+  labs(x = "Self Offer", subtitle = "Advantageous Trials") +
+  theme(panel.background = element_blank(), legend.position = "top",
+        strip.text = element_blank(),
+        legend.title = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 18), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 16), 
+        plot.subtitle = element_text(family = "Georgia", color = '#2D2327', size = 20),
+        plot.title = element_text(family = "Georgia", color = '#2D2327', size = 22),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  ggtitle("HFA Predicted By Self Offer")
+
+dis_plot <- all_brain_data_post_choice %>%
+  filter(subject == "ST40" & electrodes == "FG17" & trial_type == "Disadvantageous") %>%
+  pivot_longer(cols = starts_with("post_"), values_to = "HFA", names_to = "bin") %>%
+  mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+  filter(time <= 1000) %>%
+  ggplot(., aes(x = self_var_payoff, y = HFA)) +
+  geom_point(color = "#E4635C") +
+  geom_smooth(method = 'lm', formula = 'y~x', color = 'black', fill = 'grey') +
+  facet_wrap(~time, nrow = 1) +
+  labs(x = "Self Offer", subtitle = "Disadvantageous Trials") +
+  theme(panel.background = element_blank(), legend.position = "top",
+        strip.text = element_blank(),
+        legend.title = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 18), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 16), 
+        plot.subtitle = element_text(family = "Georgia", color = '#2D2327', size = 20),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+
+
+plot(arrangeGrob(grobs = list(adv_plot, dis_plot), nrow = 2, ncol = 1))
+
+
+ggsave(filename = path(here(), "figures", "paper", "response_to_reviwers_alt_choice1.png"),
+     device = "png",
+     width = 10,
+     height = 8,
+     units = "in",
+     dpi = 300,
+     plot =   arrangeGrob(grobs = list(adv_plot, dis_plot), nrow = 2, ncol = 1))
+
+
+
+```
+
+```{r example-elec-choice-adv}
+
+adv_plot <- all_brain_data_post_choice %>%
+  filter(subject == "ST40" & electrodes == "FG17" & trial_type == "Advantageous") %>%
+  pivot_longer(cols = starts_with("post_"), values_to = "HFA", names_to = "bin") %>%
+  mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+  filter(time <= 1000) %>%
+  ggplot(., aes(x = self_payoff, y = HFA)) +
+  geom_point(color = "#5BA6D6") +
+  geom_smooth(method = 'lm', formula = 'y~x', color = 'black', fill = 'grey') +
+  facet_wrap(~time, nrow = 1) +
+  labs(x = "Self Choice", subtitle = "Advantageous Trials") +
+  theme(panel.background = element_blank(), legend.position = "top",
+        strip.text = element_blank(),
+        legend.title = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 18), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 16), 
+        plot.subtitle = element_text(family = "Georgia", color = '#2D2327', size = 20),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+dis_plot <- all_brain_data_post_choice %>%
+  filter(subject == "ST40" & electrodes == "FG17" & trial_type == "Disadvantageous") %>%
+  pivot_longer(cols = starts_with("post_"), values_to = "HFA", names_to = "bin") %>%
+  mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+  filter(time <= 1000) %>%
+  ggplot(., aes(x = self_payoff, y = HFA)) +
+  geom_point(color = "#E4635C") +
+  geom_smooth(method = 'lm', formula = 'y~x', color = 'black', fill = 'grey') +
+  facet_wrap(~time, nrow = 1) +
+  labs(x = "Self Choice", subtitle = "Disadvantageous Trials") +
+  theme(panel.background = element_blank(), legend.position = "top",
+        strip.text = element_blank(),
+        legend.title = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 18), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 16), 
+        plot.subtitle = element_text(family = "Georgia", color = '#2D2327', size = 20),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+
+
+plot(arrangeGrob(grobs = list(adv_plot, dis_plot), nrow = 2, ncol = 1))
+
+```
+
+```{r example-elec-choice-both-trials-adv}
+
+combined_self_choice_plot <- all_brain_data_post_choice %>%
+  filter(subject == "ST40" & electrodes == "FG17", trial_type != "equality") %>%
+  pivot_longer(cols = starts_with("post_"), values_to = "HFA", names_to = "bin") %>%
+  mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+  filter(time <= 1000) %>%
+  ggplot(., aes(x = self_payoff, y = HFA, color = trial_type)) +
+  geom_point() +
+  geom_smooth(method = 'lm', formula = 'y~x', color = 'black', fill = 'grey') +
+  facet_wrap(~time, nrow = 1) +
+  labs(x = "Self Choice", color = "Trial Type") +
+  theme(panel.background = element_blank(), legend.position = "top",
+        strip.text = element_blank(),
+        legend.title = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 18), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 16), 
+        plot.subtitle = element_text(family = "Georgia", color = '#2D2327', size = 20),
+        plot.title = element_text(family = "Georgia", color = '#2D2327', size = 22),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank()) +
+  ggtitle("HFA Predicted By Chosen Self Value")
+
+
+
+ggsave(filename = path(here(), "figures", "paper", "response_to_reviwers_alt_choice2.png"),
+     device = "png",
+     width = 10,
+     height = 4,
+     units = "in",
+     dpi = 300,
+     plot =   plot(combined_self_choice_plot))
+
+```
+
+```{r example-regression-choice-adv}
+# single bin, is self foregone sig
+data_adv_tmp <- all_brain_data_post_choice %>%
+  filter(subject == "ST40" & electrodes == "FG17", trial_type == "Advantageous")
+
+data_tmp <- all_brain_data_post_choice %>%
+  filter(subject == "ST40" & electrodes == "FG17", trial_type != "Equality")
+
+
+split_model_tmp <- lm(post_10 ~ self_var_payoff, data_adv_tmp)
+summary(split_model_tmp)
+
+choice_model_tmp <- lm(post_10 ~ self_payoff, data_tmp)
+summary(choice_model_tmp)
+
+
+```
+
+### Regressions with `self_payoff` predicting HFA across both trial types in electrodes that seemed to do state-dependent encoding in `Advantageous` trials only
+
+Based on below, 12/26 elecs could in theory be explained by `self_payoff` across both trial types, but the others cannot.
+
+```{r full-choice-regressions-adv}
+### presentation
+split_ofc_self_pres_encoding_fdr_sig_dis <- split_ofc_self_pres_encoding_fdr_sig %>%
+  filter(sig == "Advantageous")
+
+nBins <- colnames(all_brain_data_pres %>% select(starts_with("bin_")))[1:15]
+
+alternate_hyp_elec <- c()
+split_hyp_elec <- c()
+for(sub in unique(split_ofc_self_pres_encoding_fdr_sig_dis$subject)){
+  
+  sub_df_tmp <- split_ofc_self_pres_encoding_fdr_sig_dis %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_pres %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                reg_vec <- brain_behave_data_elec %>% pull(self_payoff)
+                model <- summary(lm(bin_vec ~ reg_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: presentation; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+      if(sum(lm_pval < .05) > 1) {
+        alternate_hyp_elec <- c(alternate_hyp_elec, paste0(sub, "_", elec))
+      } else {
+         split_hyp_elec <- c(split_hyp_elec, paste0(sub, "_", elec))
+      }     
+  }
+}
+
+
+
+### PRE CHOICE
+split_ofc_self_pre_encoding_fdr_sig_dis <- split_ofc_self_pre_encoding_fdr_sig %>%
+  filter(sig == "Advantageous")
+
+nBins <- colnames(all_brain_data_pre_choice %>% select(starts_with("pre_")))
+
+for(sub in unique(split_ofc_self_pre_encoding_fdr_sig_dis$subject)){
+  
+  sub_df_tmp <- split_ofc_self_pre_encoding_fdr_sig_dis %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_pre_choice %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                reg_vec <- brain_behave_data_elec %>% pull(self_payoff)
+                model <- summary(lm(bin_vec ~ reg_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: Pre-Choice; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+      if(sum(lm_pval < .05) > 1) {
+        alternate_hyp_elec <- c(alternate_hyp_elec, paste0(sub, "_", elec))
+      } else {
+         split_hyp_elec <- c(split_hyp_elec, paste0(sub, "_", elec))
+      }   
+  }
+}
+
+### POST CHOICE
+split_ofc_self_post_encoding_fdr_sig_adv <- split_ofc_self_post_encoding_fdr_sig %>%
+  filter(sig == "Advantageous")
+
+nBins <- colnames(all_brain_data_post_choice %>% select(starts_with("post_")))[1:20]
+
+for(sub in unique(split_ofc_self_post_encoding_fdr_sig_adv$subject)){
+  
+  sub_df_tmp <- split_ofc_self_post_encoding_fdr_sig_adv %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_post_choice %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                reg_vec <- brain_behave_data_elec %>% pull(self_payoff)
+                model <- summary(lm(bin_vec ~ reg_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+      if(sum(lm_pval < .05) > 1) {
+        alternate_hyp_elec <- c(alternate_hyp_elec, paste0(sub, "_", elec))
+      } else {
+         split_hyp_elec <- c(split_hyp_elec, paste0(sub, "_", elec))
+      }   
+  }
+}
+
+paste0("Total Elecs possibly doing Unchosen Encoding: ", length(alternate_hyp_elec))
+paste0("Unique Elecs possibly doing Unchosen Encoding: ", length(unique(alternate_hyp_elec)))
+paste0("Total Elecs possibly doing Split Encoding: ", length(split_hyp_elec))
+paste0("Unique Elecs possibly doing Split Encoding: ", length(unique(split_hyp_elec)))
+```
+
+### Example electrode seeming to encode `self_var` in `Disadvantageous` Trials
+
+This electrode significantly encoded `self-var` in a state-dependent manner with preferential encoding for `Disadvantageous` trials only according to our original analyses. We will look to see if the electrode's behavior could be better explained by `self_foregone across all trials.
+
+```{r example-elec-state-dep-dis}
+
+# 	GP51_OFG14_self_var_payoff_post-choice
+
+adv_plot <- all_brain_data_post_choice %>%
+  filter(subject == "GP51" & electrodes == "OFG14" & trial_type == "Advantageous") %>%
+  pivot_longer(cols = starts_with("post_"), values_to = "HFA", names_to = "bin") %>%
+  mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+  filter(time <= 1000) %>%
+  ggplot(., aes(x = self_var_payoff, y = HFA)) +
+  geom_point(color = "#5BA6D6") +
+  geom_smooth(method = 'lm', formula = 'y~x', color = 'black', fill = 'grey') +
+  facet_wrap(~time, nrow = 1) +
+  labs(x = "Self Offer", subtitle = "Advantageous Trials") +
+  theme(panel.background = element_blank(), legend.position = "top",
+        strip.text = element_blank(),
+        legend.title = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 18), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 16), 
+        plot.subtitle = element_text(family = "Georgia", color = '#2D2327', size = 20),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+dis_plot <- all_brain_data_post_choice %>%
+  filter(subject == "GP51" & electrodes == "OFG14" & trial_type == "Disadvantageous") %>%
+  pivot_longer(cols = starts_with("post_"), values_to = "HFA", names_to = "bin") %>%
+  mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+  filter(time <= 1000) %>%
+  ggplot(., aes(x = self_var_payoff, y = HFA)) +
+  geom_point(color = "#E4635C") +
+  geom_smooth(method = 'lm', formula = 'y~x', color = 'black', fill = 'grey') +
+  facet_wrap(~time, nrow = 1) +
+  labs(x = "Self Offer", subtitle = "Disadvantageous Trials") +
+  theme(panel.background = element_blank(), legend.position = "top",
+        strip.text = element_blank(),
+        legend.title = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 18), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 16), 
+        plot.subtitle = element_text(family = "Georgia", color = '#2D2327', size = 20),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+
+
+plot(arrangeGrob(grobs = list(adv_plot, dis_plot), nrow = 2, ncol = 1))
+
+```
+
+```{r example-elec-choice-dis}
+
+adv_plot <- all_brain_data_post_choice %>%
+  filter(subject == "GP51" & electrodes == "OFG14" & trial_type == "Advantageous") %>%
+  pivot_longer(cols = starts_with("post_"), values_to = "HFA", names_to = "bin") %>%
+  mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+  filter(time <= 1000) %>%
+  ggplot(., aes(x = self_foregone, y = HFA)) +
+  geom_point(color = "#5BA6D6") +
+  geom_smooth(method = 'lm', formula = 'y~x', color = 'black', fill = 'grey') +
+  facet_wrap(~time, nrow = 1) +
+  labs(x = "Self Foregone", subtitle = "Advantageous Trials") +
+  theme(panel.background = element_blank(), legend.position = "top",
+        strip.text = element_blank(),
+        legend.title = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 18), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 16), 
+        plot.subtitle = element_text(family = "Georgia", color = '#2D2327', size = 20),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+dis_plot <- all_brain_data_post_choice %>%
+  filter(subject == "GP51" & electrodes == "OFG14" & trial_type == "Disadvantageous") %>%
+  pivot_longer(cols = starts_with("post_"), values_to = "HFA", names_to = "bin") %>%
+  mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+  filter(time <= 1000) %>%
+  ggplot(., aes(x = self_foregone, y = HFA)) +
+  geom_point(color = "#E4635C") +
+  geom_smooth(method = 'lm', formula = 'y~x', color = 'black', fill = 'grey') +
+  facet_wrap(~time, nrow = 1) +
+  labs(x = "Self Foregone", subtitle = "Disadvantageous Trials") +
+  theme(panel.background = element_blank(), legend.position = "top",
+        strip.text = element_blank(),
+        legend.title = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 18), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 16), 
+        plot.subtitle = element_text(family = "Georgia", color = '#2D2327', size = 20),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+
+
+plot(arrangeGrob(grobs = list(adv_plot, dis_plot), nrow = 2, ncol = 1))
+
+```
+
+```{r example-elec-choice-both-trials-dis}
+
+all_brain_data_post_choice %>%
+  filter(subject == "GP51" & electrodes == "OFG14", trial_type != "equality") %>%
+  pivot_longer(cols = starts_with("post_"), values_to = "HFA", names_to = "bin") %>%
+  mutate(time = 50 * as.numeric(gsub("post_", "", bin))) %>%
+  filter(time <= 1000) %>%
+  ggplot(., aes(x = self_foregone, y = HFA, color = trial_type)) +
+  geom_point() +
+  geom_smooth(method = 'lm', formula = 'y~x', color = 'black', fill = 'grey') +
+  facet_wrap(~time, nrow = 1) +
+  labs(x = "Self Foregone") +
+  theme(panel.background = element_blank(), legend.position = "top",
+        strip.text = element_blank(),
+        legend.title = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        legend.text = element_text(family = "Georgia", color = '#2D2327', size = 18),
+        axis.title = element_text(family = "Georgia", color = '#2D2327', size = 18), 
+        axis.text = element_text(family = "Georgia", color = '#2D2327', size = 16), 
+        plot.subtitle = element_text(family = "Georgia", color = '#2D2327', size = 20),
+        axis.text.x = element_blank(), axis.ticks.x = element_blank())
+
+
+self_plot <- all_brain_data_post_choice %>%
+  filter(subject == "GP51" & electrodes == "OFG14", trial_type != "equality") %>%
+  pivot_longer(cols = starts_with("post_"), values_to = "HFA", names_to = "bin") %>%
+  filter(bin == "post_10") %>%
+  ggplot(., aes(x = self_var_payoff, y = HFA, color = trial_type)) +
+  geom_jitter() +
+  labs(x = "Self Offer") +
+  theme(panel.background = element_blank(), legend.position = "top")
+
+other_plot <- all_brain_data_post_choice %>%
+  filter(subject == "GP51" & electrodes == "OFG14", trial_type != "equality") %>%
+  pivot_longer(cols = starts_with("post_"), values_to = "HFA", names_to = "bin") %>%
+  filter(bin == "post_10") %>%
+  ggplot(., aes(x = other_var_payoff, y = HFA, color = trial_type)) +
+  geom_jitter() +
+  labs(x = "Other Offer") +
+  theme(panel.background = element_blank(), legend.position = "top")
+
+plot(arrangeGrob(grobs = list(self_plot, other_plot), nrow = 2, ncol = 1))
+
+
+```
+
+```{r example-regression-choise-dis}
+# single bin, is self foregone sig
+data_dis_tmp <- all_brain_data_post_choice %>%
+  filter(subject == "GP51" & electrodes == "OFG14", trial_type == "Disadvantageous")
+
+data_tmp <- all_brain_data_post_choice %>%
+  filter(subject == "GP51" & electrodes == "OFG14", trial_type != "Equality")
+
+
+split_model_tmp <- lm(post_10 ~ self_var_payoff, data_dis_tmp)
+summary(split_model_tmp)
+
+foregone_model_tmp <- lm(post_10 ~ self_foregone, data_dis_tmp)
+summary(foregone_model_tmp)
+
+combined_model_tmp <- lm(post_10 ~ self_var_payoff + self_foregone, data_dis_tmp)
+summary(combined_model_tmp)
+
+
+# interaction
+
+split_model_tmp <- lm(post_10 ~ self_var_payoff, data_tmp)
+summary(split_model_tmp)
+
+foregone_model_tmp <- lm(post_10 ~ self_foregone, data_tmp)
+summary(foregone_model_tmp)
+
+combined_model_tmp <- lm(post_10 ~ self_var_payoff + self_foregone, data_dis_tmp)
+summary(combined_model_tmp)
+
+
+```
+
+### Regressions with `self_payoff` predicting HFA across both trial types in electrodes that seemed to do stat-dependent encoding in `Disadvantageous` trials only
+
+Based on below, 11/24 electrode-epoch pairs could in theory be explained by the not chosen option, but the others cannot.
+
+```{r full-choice-regressions-dis}
+
+
+### presentation
+split_ofc_self_pres_encoding_fdr_sig_dis <- split_ofc_self_pres_encoding_fdr_sig %>%
+  filter(sig == "Disadvantageous")
+
+nBins <- colnames(all_brain_data_pres %>% select(starts_with("bin_")))[1:15]
+alternate_hyp_elec <- c()
+split_hyp_elec <- c()
+
+for(sub in unique(split_ofc_self_pres_encoding_fdr_sig_dis$subject)){
+  
+  sub_df_tmp <- split_ofc_self_pres_encoding_fdr_sig_dis %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_pres %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                reg_vec <- brain_behave_data_elec %>% pull(self_foregone)
+                model <- summary(lm(bin_vec ~ reg_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: presentation; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+      if(sum(lm_pval < .05) > 1) {
+        alternate_hyp_elec <- c(alternate_hyp_elec, paste0(sub, "_", elec))
+      } else {
+         split_hyp_elec <- c(split_hyp_elec, paste0(sub, "_", elec))
+      }      
+  }
+}
+
+
+
+### PRE CHOICE
+split_ofc_self_pre_encoding_fdr_sig_dis <- split_ofc_self_pre_encoding_fdr_sig %>%
+  filter(sig == "Disadvantageous")
+
+nBins <- colnames(all_brain_data_pre_choice %>% select(starts_with("pre_")))
+
+for(sub in unique(split_ofc_self_pre_encoding_fdr_sig_dis$subject)){
+  
+  sub_df_tmp <- split_ofc_self_pre_encoding_fdr_sig_dis %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_pre_choice %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                reg_vec <- brain_behave_data_elec %>% pull(self_foregone)
+                model <- summary(lm(bin_vec ~ reg_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: Pre-Choice; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+      if(sum(lm_pval < .05) > 1) {
+        alternate_hyp_elec <- c(alternate_hyp_elec, paste0(sub, "_", elec))
+      } else {
+         split_hyp_elec <- c(split_hyp_elec, paste0(sub, "_", elec))
+      }      
+  }
+}
+
+### POST CHOICE
+split_ofc_self_post_encoding_fdr_sig_dis <- split_ofc_self_post_encoding_fdr_sig %>%
+  filter(sig == "Disadvantageous")
+
+nBins <- colnames(all_brain_data_post_choice %>% select(starts_with("post_")))[1:20]
+
+for(sub in unique(split_ofc_self_post_encoding_fdr_sig_dis$subject)){
+  
+  sub_df_tmp <- split_ofc_self_post_encoding_fdr_sig_dis %>% filter(subject == sub)
+  
+  for(elec in unique(sub_df_tmp$electrode)){
+    
+      brain_behave_data_elec <- all_brain_data_post_choice %>% 
+        filter(electrodes == elec & subject == sub & trial_type != "equality")
+       
+      # initialize temp vars #
+      r2 <- NULL
+      fstat <- NULL
+      beta <- NULL
+      lm_pval <- NULL
+      intercept <- NULL
+      
+       for (bin in nBins) {      
+                # run models #
+                bin_vec <- brain_behave_data_elec %>% pull(bin)
+                reg_vec <- brain_behave_data_elec %>% pull(self_foregone)
+                model <- summary(lm(bin_vec ~ reg_vec))
+                
+                # store info from models #
+                r2[bin] <- model$r.squared
+                fstat[bin] <- model$fstatistic[1]
+                intercept[bin] <-  model$coefficients[1, 1]
+                beta[bin] <- model$coefficients[2, 1]
+                lm_pval[bin] <- model$coefficients[2,4]
+                
+       }
+      print(paste0("Epoch: Post-Choice; Subject: ", sub, "; Elec: ", elec))
+      print(table(lm_pval < .05))
+      if(sum(lm_pval < .05) > 1) {
+        alternate_hyp_elec <- c(alternate_hyp_elec, paste0(sub, "_", elec))
+      } else {
+         split_hyp_elec <- c(split_hyp_elec, paste0(sub, "_", elec))
+      }     
+  }
+}
+
+paste0("Total Elecs possibly doing Unchosen Encoding: ", length(alternate_hyp_elec))
+paste0("Unique Elecs possibly doing Unchosen Encoding: ", length(unique(alternate_hyp_elec)))
+paste0("Total Elecs possibly doing Split Encoding: ", length(split_hyp_elec))
+paste0("Unique Elecs possibly doing Split Encoding: ", length(unique(split_hyp_elec)))
+```
+
