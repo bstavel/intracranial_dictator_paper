@@ -23,3 +23,6 @@ This repo contains the main analysis scripts for the above paper that investigat
     * bash scripts for submitting jobs to slurm 
 * data, munge, results
     * data removed
+
+
+[![DOI](https://zenodo.org/badge/514342754.svg)](https://zenodo.org/badge/latestdoi/514342754)
